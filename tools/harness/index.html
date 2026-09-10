@@ -1,0 +1,91 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>vault graph harness</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  :root { --text-normal:#dcddde; --text-muted:#999; --text-faint:#666; --interactive-accent:#7f6df2; --color-blue:#2f81f7; --background-primary:#1e1e1e; --background-modifier-border:#333; --background-modifier-hover:#2a2a2a; --font-interface: system-ui, sans-serif; --font-ui-smaller: 12px; --size-2-1:2px; --size-2-2:4px; --size-2-3:6px; --size-4-2:8px; --size-4-3:12px; --size-4-6:24px; --radius-m:6px; --text-accent:#7f6df2; --text-error:#e55; }
+  html, body { margin:0; height:100%; background:#1e1e1e; color:#dcddde; font: 13px system-ui; }
+  #host { position:absolute; inset:0; }
+  #log { position:absolute; right:8px; top:60px; width:320px; max-height:40%; overflow:auto; background:#0008; font:11px monospace; padding:6px; white-space:pre-wrap; z-index:9; }
+</style></head>
+<body><div id="host"></div><div id="log"></div>
+<script>
+// --- Obsidian DOM helpers used by the fork's view code ---
+(function () {
+  const P = HTMLElement.prototype;
+  P.empty = function () { while (this.firstChild) this.removeChild(this.firstChild); };
+  P.addClass = function (...c) { this.classList.add(...c); };
+  P.removeClass = function (...c) { this.classList.remove(...c); };
+  P.toggleClass = function (c, v) { this.classList.toggle(c, v); };
+  P.setText = function (t) { this.textContent = t; };
+  P.appendText = function (t) { this.appendChild(document.createTextNode(t)); };
+  P.createEl = function (tag, o = {}) { const el = document.createElement(tag); if (o.cls) el.className = Array.isArray(o.cls) ? o.cls.join(" ") : o.cls; if (o.text != null) el.textContent = o.text; if (o.attr) for (const [k, v] of Object.entries(o.attr)) el.setAttribute(k, v); this.appendChild(el); return el; };
+  P.createDiv = function (o) { return this.createEl("div", o); };
+  P.createSpan = function (o) { return this.createEl("span", o); };
+})();
+const LOG = document.getElementById("log");
+function log(...a) { LOG.textContent += a.map((x) => typeof x === "string" ? x : JSON.stringify(x)).join(" ") + "\n"; console.log(...a); }
+window.addEventListener("error", (e) => log("ERROR", e.message, e.filename + ":" + e.lineno));
+window.addEventListener("unhandledrejection", (e) => log("REJECTION", String(e.reason && e.reason.stack || e.reason)));
+// --- module stubs (same idea as tools/smoke_test.js) ---
+function make_module_stub(name) {
+  const cache = {};
+  return new Proxy(function () {}, {
+    get(t, prop) {
+      if (prop === "default") return make_module_stub(name + ".default");
+      if (prop === "setIcon") return (el, n) => { el.textContent = n; };
+      if (prop === "Notice") return function Notice(m) { log("NOTICE:", m); };
+      if (prop === "Keymap") return { isModEvent: (e) => !!(e && (e.metaKey || e.ctrlKey)), isModifier: () => false };
+      if (!(prop in cache)) {
+        cache[prop] = class Stub { constructor() {} };
+      }
+      return cache[prop];
+    }
+  });
+}
+var module = { exports: {} };
+var exports = module.exports;
+function require(name) { return make_module_stub(name); }
+</script>
+<script src="main.js"></script>
+<script src="d3.v7.min.js"></script>
+<script>
+// the UMD took the CommonJS branch because of the module/exports globals above
+if (!window.d3 && exports && exports.forceSimulation) window.d3 = exports;
+log("d3", window.d3 && window.d3.version);
+// --- fake env: N notes in G groups of unit vectors (d dims) ---
+const params = new URLSearchParams(location.search);
+const N = +params.get("n") || 400, G = +params.get("g") || 6, D = 64;
+function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t ^= t + Math.imul(t ^ t >>> 7, 61 | t); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry(99);
+const centers = Array.from({ length: G }, () => Array.from({ length: D }, () => rnd() - 0.5));
+const items = {};
+const keys = [];
+for (let i = 0; i < N; i++) {
+  const g = i % G;
+  const vec = centers[g].map((c) => c + (rnd() - 0.5) * 0.5);
+  const key = `Folder ${g}/Note ${String(i).padStart(4, "0")} about topic ${g}.md`;
+  keys.push(key);
+  items[key] = { key, path: key, vec, size: 500, collection_key: "smart_sources", outlinks: [], env: null };
+}
+// a few wikilinks inside groups
+for (let i = 0; i < N; i += 7) items[keys[i]].outlinks.push({ key: keys[(i + G) % N] });
+const events = { on(k, cb) { (events.h[k] ||= []).push(cb); return () => {}; }, emit(k, e) { (events.h[k] || []).forEach((cb) => cb(e)); }, h: {} };
+const settings = {};
+const env = { smart_sources: { items, get: (k) => items[k] }, settings, events, state: "loaded", plugin: null };
+for (const it of Object.values(items)) it.env = env;
+const app = { workspace: { trigger: (...a) => log("workspace.trigger", a[0], a[1] && a[1].linktext), getLeavesOfType: () => [], getActiveFile: () => null, activeEditor: null, getLeaf: () => ({ openFile: async (f) => log("openFile", f && f.path) }), onLayoutReady: (cb) => cb(), registerHoverLinkSource: () => {}, rootSplit: {} }, metadataCache: { getFirstLinkpathDest: (p) => ({ path: p, basename: p }) }, vault: { getAbstractFileByPath: (p) => ({ path: p }) }, fileManager: { generateMarkdownLink: (t) => `[[${t.path}]]` } };
+env.plugin = { app, env, manifest: { id: "local-connections" } };
+window.app = app;
+const plugin = env.plugin;
+const view = new LcVaultGraphView(null, plugin);
+view.app = app;
+const host = document.getElementById("host");
+view.containerEl = { children: [null, host] };
+view.register = () => {};
+Object.defineProperty(view, "env", { get: () => env });
+window.view = view; window.env = env;
+log(`harness: ${N} notes, ${G} groups, d=${D}`);
+const t0 = performance.now();
+view.render_view({}).then(() => log("render_view resolved in", Math.round(performance.now() - t0), "ms", "settings:", JSON.stringify(settings.lc_vault_graph)));
+</script>
+</body></html>
