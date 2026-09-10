@@ -1,0 +1,85 @@
+# Local Connections
+
+Local-only fork of [Smart Connections](https://github.com/brianpetro/obsidian-smart-connections) (MIT, © Brian Petro) with a visualiser inspired by https://github.com/Mossy1022/Smart-Connections-Visualizer, a simple semantic search and a whole-vault semantic graph (canvas renderer adapted from [Smart Vault Visualizer](https://github.com/Mossy1022/Smart-Connections-Vault-Visualizer), MIT © 2024 Mossy1022).
+It is simple, local only, and all functionality lives in a single side window. Off by default on mobile. 
+
+
+- **v1.9.0** — **Vault graph**: a whole-vault semantic map in its own tab (orbit ribbon icon, command *Open: Vault graph*, Connections menu → *Open vault graph*). Every embedded note is a node, grouped into k-means clusters over the local embeddings (cluster count automatic or chosen), with spokes to the cluster hub, links to each note's nearest neighbours, and blue lines for existing note links. Canvas renderer adapted from Smart Vault Visualizer (MIT); the clustering and neighbour search are the fork's own and run in chunks so the UI stays responsive. Settings → **Vault graph** (stored at `lc_vault_graph`). Also fixes the two *Semantic search* commands, which had never registered (their command specs were appended to the file after the actions config that references them).
+- **v1.8.0** — Repo trimmed to the plugin + `tools/` + `DEVELOPING.md`: `archive/` 
+- v1.6.1 — **the classic graph is back.** v1.6.0 removed it on the strength of the cleanup plan; it is restored in full, along with `d3.v7.min.js`, the **Graph visualization** setting and the **Graph style** switch in the hamburger menu. Its one dependency that v1.6.0 had deleted (a duplicate `cos_sim`) now points at the surviving copy.
+- v1.6.0 — **upstream code removed.** The bundle is 33k lines / 1.2 MB, down from 47k / 1.8 MB, and `d3.v7.min.js` (280 KB) is gone. Removed: the Smart Plugins store, OAuth/referral/Pro and supporter promos; the notifications feed, milestones and status bar (with the `event_logs` collection that wrote a counter to disk on *every* emitted event); environment stats, data export, the source inspector, the mobile status view, the getting-started story modal and the in-app release notes; footer connections and its CodeMirror extension, plus the `smart-connections` codeblock; the canvas / excalidraw / base / rendered source adapters; and a second, byte-identical copy of the `smart-collections` library that upstream bundled twice. `styles.css` went from 5,310 to ~1,280 lines. Events that carry a level still show as plain Obsidian notices.
+- v1.5.5 — Settings → **Embedding → Minimum note length** (upstream defines this setting but never renders it; the inline Sources section only shows re-import wait, exclusions and Reset data). Shows how many notes are at or below the length, and changing it re-imports every note so newly eligible ones are embedded immediately. The Maintenance section is now called Embedding.
+- v1.5.4 — notes shorter than the Sources **Minimum length** (200 characters here) have no embedding, so they can have no connections and the force graph cannot centre on them. The connections list and the graph now say exactly that (with the note's size and where to change the minimum) instead of "No results found / try Clear sources data" and "Force graph failed to render: Invalid vector input to nearest()". The generic no-results hint now points at Maintenance → Reset embeddings.
+- v1.5.3 — Settings → **Maintenance → Reset embeddings** (clears all sources data and optimization `.backup` files, re-imports and re-embeds every note; the upstream "Reset data" button is in the inline Smart Environment section further down the same tab); "Explore in Smart Graph" removed from the Connections hamburger menu.
+- v1.5.2 — **blocks on demand**: notes are parsed into blocks and blocks are embedded only while the Connections list or Semantic search results type is set to *Blocks* (both default to *Notes*). Picking Blocks re-imports all notes to build them; going back to Notes stops block work and drops a note's stored blocks when it is next re-imported. Previously every note was split and every block embedded regardless (5,586 block vectors for 313 notes here). The Smart Blocks "Embed blocks" switch remains as a hard off. Also: legacy lookup default switched to Notes.
+- v1.5.1 — search bar moved to the top of the **Search results** panel (graph-follows-search toggle at the end of the same line); **⌘-click (Ctrl-click) on any result row** (search results and connections list) inserts a link to that note at the cursor instead of opening it (hover with ⌘ still previews); existing-link ("wikilink") lines in both graphs are now solid blue instead of dashed accent-coloured.
+- v1.5.0 — **Semantic search**: a search bar in the Connections view (search as you type; Enter submits, Esc clears), a "Search results" panel at the bottom of the view, and the graph follows the search while it has results (query in the centre, results around it; caption/toggle to switch back to the note's connections). Settings → **Semantic search** (results type notes|blocks, limit, search-as-you-type, graph follows search, apply connections filters). Commands *Semantic search: focus search box* / *search selected text*.
+- v1.4.7 — connections view hamburger menu: "Connections settings" is now "Settings", a **Graph style** switch (Force graph / Classic, checkmark on the active one) replaces the trip to the settings tab, and "Send to Smart Context" is gone. Force-graph gear button is the bare icon (no box) and its menu is headed "Graph Settings".
+- v1.4.6 — force graph: clicking a node opens the note and moves the connections view/graph to it (also when auto-refresh is paused); **⌘-click (Ctrl-click) a node inserts a link to that note (with heading, for block nodes) at the cursor in the current note**.
+- v1.4.5 — switching Classic → Force graph no longer needs a restart: the classic renderer injects its own stylesheet on first render and its `.connections-graph { block-size: auto }` rule outranked the visualizer box height, collapsing the force graph to 0px until Obsidian restarted. The visualizer also now waits for its container to be laid out before measuring, and shows render errors inside the graph.
+- v1.4.4 — classic graph labels are always visible: shortened note name beside each node (outward side), full name on hover; score stays above the node.
+- v1.4.3 — classic graph draws the semantic connections (centre → each result, line width by score) as well as note links; the force-graph gear-menu reset (↻) now restores this fork's defaults instead of SCV stock (stock = "Blocks" only + 50% threshold, which blanks the graph when results are notes — this is what happened when the menu first became reachable); an empty graph now shows an in-graph explanation of which filter removed everything instead of a vanishing toast; settings written by that stock reset are migrated back to fork defaults once.
+- v1.4.2 — both graphs draw existing note links (wikilinks) between the notes shown in the graph as dashed accent-coloured lines; force-graph link lines use the theme text colour (much brighter); the force-graph gear menu overlays the list below and scrolls instead of being clipped by the graph box; the classic graph's local d3 loader works inside Obsidian's renderer (it previously exported d3 to CommonJS instead of `window.d3`, so the classic graph never rendered).
+- v1.4.1 — Pro gate removed: settings tagged PRO are editable (no lock, no badge); the four Connections filters (exclude inlinks/outlinks, include/exclude path filter) are now actually applied to results — the free build saved them but never used them; the "Show inline connections" toggle is removed because the free bundle contains no inline-connections renderer.
+- v1.4.0 — settings tab cleanup (User Agreement / Smart Lookup callouts and the whole action-button row removed; Smart Environment settings render inline at the end of the tab instead of a separate tab) and **local embedding model files** (add a Transformers.js ONNX model folder; loaded from the vault, nothing downloaded).
+- v1.3.0 — force graph follows the connections list results.
+- v1.2.0 — embeds [Smart Connections Visualizer](https://github.com/mossy1022/smart-connections-visualizer) v1.0.27 (by Evan Moscoso) as a selectable graph renderer.
+- v1.1.0 — based on Smart Connections **v4.7.2** (patched released bundle).
+- v1.0.0 — based on Smart Connections v4.3.0.
+
+## Embedded Visualizer (v1.2.0)
+
+The Smart Connections Visualizer force graph is bundled into `main.js` (its own d3 modules included; no network access, no separate plugin needed — disable/uninstall the standalone Smart Connections Visualizer plugin).
+
+- **Where**: renders at the top of the Connections view, in the same slot as the built-in classic graph.
+- **Choosing**: Settings → Local Connections → Connections → **Graph visualization** dropdown: *Classic graph (built-in)* or *Force graph (Visualizer)*; the hamburger menu has the same switch. Switching re-renders the open view immediately.
+- **Visualizer tuning** (score threshold, forces, node/label sizes, colors, block vs note connections) lives in the gear icon inside the graph itself; values persist under `visualizer` in this plugin's settings. They are intentionally stored outside `connections_lists.*` because any settings change under that key re-renders the whole connections view (which would kill the graph mid-slider-drag).
+- The graph follows the connections view's note; it re-renders when you switch notes.
+- **Existing links** (v1.4.2, solid blue since v1.5.1): when two notes shown in the graph link to each other (a wikilink/markdown link in either direction, resolved via the note's outlinks), a solid blue line joins them (label "linked" on hover). Blocks count for their note. The classic graph draws the same blue lines plus a solid line from the centre note to every result (thicker = higher score) in a `links` layer under its nodes.
+- **Node clicks**: click opens the note and the graph follows it. ⌘-click / Ctrl-click inserts a markdown link to the node (heading subpath for block nodes) at the cursor in the editor showing the graph's current note (falls back to the most recently active editor).
+- **Gear menu ↻ (reset)** restores this fork's defaults (no threshold, Both connection types, thicker links, larger labels). If the graph is empty, a message inside the graph says which filter removed the results.
+
+## Semantic search (v1.5.0)
+
+Search the vault by meaning from inside the Connections view, using the same local embedding model, the same scoring (cosine similarity via the `lookup_lists` engine that upstream ships in the bundle) and the same result rows as the connections list. Nothing leaves the machine. UI logic adapted from [Smart Lookup](https://github.com/brianpetro/smart-lookup-obsidian) v0.3.4 (MIT, Brian Petro).
+
+- **Where**: a **Search results** panel at the bottom of the Connections view, below the connections list. Its first row is the search bar: input, clear (✕), submit (↵, shown when search-as-you-type is off) and the graph-follows-search toggle at the end of the line; results render underneath. The panel is created once per view and re-attached on every re-render, so the query and results survive opening a result or switching notes.
+- **Typing**: search as you type (300 ms after you pause) by default; Enter always submits, Esc clears, the ✕ button clears. With *Search as you type* off, press Enter or the ↵ button.
+- **Results**: notes by default (blocks optional); collapsible rows identical to the connections list (score badge, click to open, hover preview, drag to link). **⌘-click / Ctrl-click a row** (here and in the connections list) inserts a markdown link to the note (heading subpath for blocks) at the cursor in the editor of the view's current note (falls back to the active editor) instead of opening it. A "N notes for “…”" line sits under the search bar.
+- **Graph follows search**: while a search has results the graph (classic or force) shows the query as the centre node with results around it. A caption under the graph ("Graph: search …" → *Show note connections*) and the fork icon in the results header switch back to the current note's connections; the setting remembers the choice.
+- **Filters**: *Apply connections filters* (default on) applies the Connections include/exclude path filters, frontmatter include/exclude and *Hide frontmatter blocks* to search results. Inlink/outlink exclusions are skipped (a search has no centre note).
+- **Settings**: Settings → Local Connections → **Semantic search**. Stored at `lc_search` in the Smart Environment settings, outside `connections_lists.*`, so changing them re-runs the search instead of re-rendering the whole view.
+- **Commands**: *Semantic search: focus search box* (opens/reveals the Connections view and focuses the input) and *Semantic search: search selected text* (searches the editor selection).
+- **Chat** with the local LLM about notes is deliberately not included (shelved); the bundle contains no chat-model code.
+
+
+## Vault graph (v1.9.0)
+
+A map of the whole vault from the embeddings that already exist for the connections view. Opens in its own tab from the **orbit** ribbon icon, the command **Open: Vault graph**, or the Connections view's hamburger menu → *Open vault graph*. Nothing is persisted and nothing leaves the machine; the graph is recomputed from the current embeddings when opened or refreshed.
+
+- **Nodes**: every note with an embedding (notes below the minimum length have none and are not drawn). Each note is coloured by its cluster.
+- **Clusters**: k-means (k-means++ seeding, cosine similarity on unit vectors) over the note vectors. The count is automatic (about √(n/2), between 2 and 40) or set in the toolbar / settings. Each cluster is drawn as a hub named after the note nearest its centroid, with the member count under it; the legend (top-left) lists clusters by size and clicking a row or a hub zooms to that cluster.
+- **Links**: faint coloured **spokes** from each note to its hub (shorter = closer to the centroid); **neighbour links** to each note's N most similar notes (0–5, default 2; the **link threshold** hides the weaker ones); and solid blue **note links** where two notes link to each other. Toggle each layer in the toolbar.
+- **Interaction**: hover highlights a note and its links, or a whole cluster from its hub; **click** a note opens it in the current markdown tab (shift-click: a new tab) — never in the graph's tab; **⌘-click / Ctrl-click** inserts a link to the note at the cursor of the active editor; **⌘-hover** shows the page preview; drag nodes; scroll to zoom; double-click the background (or the *fit* button) to fit everything. **Find** highlights notes whose name contains the text; **Pin** freezes the layout. Note labels appear when zoomed in past 1.5×, on hover, and for highlighted notes.
+- **Recomputing**: the graph notes when embeddings change (embedding finished, re-import) and offers a *refresh* in the status line rather than redrawing under you. Changing the cluster count re-clusters; changing the neighbour count re-runs the neighbour search; the threshold and the layer toggles apply immediately.
+- **Cost**: the neighbour search compares every note with every other note. It runs in the background in chunks with a progress percentage; expect a few seconds for a couple of thousand notes. Set neighbours to 0 to skip it.
+- **Settings**: Settings → Local Connections → **Vault graph**. Stored at `lc_vault_graph` in the Smart Environment settings, outside `connections_lists.*`; the toolbar writes the same keys.
+- The canvas renderer (zoom, drag, hit-testing, hover fade) is adapted from `clusters_visualizer.js` of [Smart Vault Visualizer](https://github.com/Mossy1022/Smart-Connections-Vault-Visualizer) v1.0.44 (MIT © 2024 Mossy1022; the notice is reproduced in `main.js` at the top of the vault-graph section). The clustering and neighbour search are this fork's own — that plugin kept its clusters in jsbrains collections this bundle does not have.
+
+## Install
+1. Copy this folder to `<vault>/.obsidian/plugins/local-connections/` (including `d3.v7.min.js` for the classic graph).
+2. **Disable Smart Connections and Smart Lookup first** (they share the global Smart Environment and views).
+3. Enable *Local Connections* in Community plugins.
+
+## Developing
+
+`main.js` in this folder is the source: it is edited directly, with no build
+step. (Up to v1.5.5 it was generated by a five-script patch chain from the
+upstream Smart Connections bundle; that pipeline was retired on 2026-09-10 and
+its scripts were deleted at v1.8.0.)
+
+    ../tools/check.sh      # 4 jsc tests
+    ../tools/install.sh    # verify, then copy into the vault
+
+See `../DEVELOPING.md` for the layout, how to navigate 30k lines, the invariants
+that are not visible in the code, and what taking an upstream update costs now.

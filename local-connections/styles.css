@@ -1,0 +1,1412 @@
+.sc-list {
+  padding-bottom: 20px;
+
+  .tree-item-self {
+    cursor: pointer;
+
+    small {
+      color: var(--color-gray-40);
+    }
+  }
+
+  > .sc-collapsed ul {
+    display: none;
+  }
+
+  > .sc-collapsed span svg {
+    transform: rotate(-90deg);
+  }
+
+  > :not(.sc-collapsed) span svg {
+    transform: rotate(0deg);
+  }
+
+  > div {
+    span svg {
+      height: auto;
+      margin: auto 0.5em auto 0;
+      flex: none;
+    }
+
+    > span {
+      display: inline-flex;
+      width: 100%;
+      padding-left: 0;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 1.3rem;
+    }
+
+    > a {
+      display: block;
+    }
+
+    > ul > li {
+      display: block;
+    }
+  }
+  .sc-result {
+    > ul {
+      list-style: none;
+      padding-left: 0;
+    }
+  }
+
+  .sc-result.sc-result-plaintext {
+    font-size: var(--font-ui-smaller);
+    line-height: var(--line-height-tight);
+    background-color: var(--search-result-background);
+    border-radius: var(--radius-s);
+    overflow: hidden;
+    margin: var(--size-4-1) 0 var(--size-4-2);
+    color: var(--text-muted);
+    box-shadow: 0 0 0 1px var(--background-modifier-border);
+
+    & > * li {
+      cursor: var(--cursor);
+      position: relative;
+      padding: var(--size-4-2) var(--size-4-5) var(--size-4-2) var(--size-4-3);
+      white-space: pre-wrap;
+      width: 100%;
+      border-bottom: 1px solid var(--background-modifier-border);
+    }
+  }
+
+  .sc-result:not(.sc-result-plaintext) {
+    cursor: pointer;
+    padding: var(--nav-item-padding);
+    padding-left: 0;
+    margin-bottom: 1px;
+    align-items: baseline;
+    border-radius: var(--radius-s);
+    font-weight: var(--nav-item-weight);
+
+    &:hover {
+      color: var(--nav-item-color-active);
+      background-color: var(--nav-item-background-active);
+      font-weight: var(--nav-item-weight-active);
+    }
+
+    span {
+      color: var(--h5-color);
+    }
+
+    small {
+      color: var(--h5-color);
+      font-size: 0.8rem;
+    }
+
+    p {
+      margin-top: 0.3rem;
+      margin-bottom: 0.3rem;
+    }
+
+    ul > li {
+      h1 {
+        font-size: 1.3rem;
+      }
+
+      h2 {
+        font-size: 1.25rem;
+      }
+
+      h3 {
+        font-size: 1.2rem;
+      }
+
+      h4 {
+        font-size: 1.15rem;
+      }
+
+      h5 {
+        font-size: 1.1rem;
+      }
+
+      h6 {
+        font-size: 1.05rem;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6 {
+        margin-block-start: calc(var(--p-spacing)/2);
+        margin-block-end: calc(var(--p-spacing)/2);
+      }
+    }
+  }
+} /* end .sc-list */
+
+/* Only on right sidebar */
+.mod-right-split .sc-list .sc-result {
+  font-size: var(--font-smallest);
+}
+
+.sc-top-bar {
+  display: flex;
+  width: 100%;
+  justify-content: end;
+
+  .sc-context {
+    color: var(--nav-item-color);
+    font-size: var(--nav-item-size);
+    margin: 0.5em 0.5em 1em;
+    width: 100%;
+  }
+}
+
+#sc-abort-button {
+  cursor: pointer;
+  padding: 10px;
+  border-radius: 5px;
+
+  &:hover {
+    background-color: var(--background-primary);
+  }
+}
+
+.sc-bottom-bar {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: var(--titlebar-background);
+  padding: 0 0.5rem;
+
+  .sc-brand {
+    flex-shrink: 0;
+  }
+
+  .sc-context {
+    flex-grow: 1;
+    font-size: var(--font-smallest);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.setting-component[data-setting*="/"][data-setting*="api_key"] {
+  display: none;
+}
+
+.setting-component[data-setting*="gpu"]:not([data-setting*="/"]) {
+  display: none;
+}
+
+/* SINCE COMPONENT PATTERN SETTINGS */
+
+.setting-component[data-setting="smart_change.active"] {
+  display: none;
+}
+
+.group-header {
+  display: flex;
+  text-wrap: nowrap;
+  flex-wrap: wrap;
+  align-items: baseline;
+
+  > h2 {
+    width: 100%;
+    margin-bottom: 0;
+  }
+
+  > * {
+    flex-grow: 1;
+    margin-bottom: 10px;
+  }
+}
+
+/* keyframes must be at root level */
+@keyframes typing-bounce {
+  0%,
+  80%,
+  100% {
+    transform: scale(0.6);
+  }
+  40% {
+    transform: scale(1);
+  }
+}
+
+/* Side Panes */
+div.workspace-leaf-content[data-type^="smart-"] {
+  > .view-content {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+.sc-inline-confirm-row {
+  margin-top: 10px;
+  padding: 6px;
+  border: 1px solid var(--interactive-normal);
+}
+.sc-inline-confirm-row-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+
+  & .sc-inline-confirm-yes {
+    font-weight: bold;
+  }
+  & .sc-inline-confirm-cancel {
+    font-weight: normal;
+  }
+}
+
+/* Connections results (redundant with v3.css inc components, should be safe to remove) */
+.sc-result a.sc-result-file-title {
+  text-decoration: none;
+}
+
+.sc-result a.sc-result-file-title > small.sc-score {
+  display: inline-block;
+  width: auto;
+  height: 1.7em;
+  padding: 0 0.3em;
+  line-height: 1.7em;
+  text-align: center;
+  font-weight: 600;
+  font-size: var(--font-smallest);
+  color: var(--nav-item-color);
+  background: var(--background-modifier-hover);
+  border-radius: 6px;
+  margin-right: 0.2em;
+}
+
+a.sc-result-file-title > small.sc-title {
+    font-weight: 500;
+    text-decoration: underline;
+}
+
+a.sc-result-file-title > .sc-breadcrumb:not(.sc-path, .sc-title, .sc-score) {
+    font-style: italic;
+}
+
+a.sc-result-file-title > small.sc-breadcrumb-separator {
+    color: color-mix(in srgb, var(--text-normal) 50%, transparent);
+}
+
+/* Imported from: obsidian-smart-env/src/modals/smart_model_modal.css */
+.modal-content.smart-model-modal .setting-component:has(.dropdown-no-options) {
+  display: block;
+}
+/* Imported from: obsidian-smart-env/src/components/settings/env_model.css */
+.model-settings .model-info {
+  border-radius: var(--radius-m);
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  background-color: var(--background-secondary);
+  .smart-env-settings-header {
+    gap: 1rem;
+    margin-bottom: 0;
+  }
+  .model-info-content {
+    flex: 1;
+    min-width: 0;
+  }
+  .model-info-content > b,
+  pre {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .model-info-content > b {
+    display: block;
+    white-space: nowrap;
+  }
+  pre {
+    margin: 0.25rem 0 0;
+    font-size: 0.9rem;
+    white-space: pre;
+  }
+  .model-actions,
+  .model-action-buttons,
+  .model-delete-confirm {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .model-action-buttons,
+  .model-delete-confirm {
+    gap: 0.5rem;
+  }
+  .model-action-buttons[hidden],
+  .model-delete-confirm[hidden] {
+    display: none;
+  }
+  .model-delete-confirm-label {
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .test-result-icon {
+    vertical-align: middle;
+    margin-left: 0.5rem;
+  }
+  .test-result-icon[data-icon="square-check-big"]{
+    color: var(--color-green);
+  }
+  .test-result-icon[data-icon="circle-x"]{
+    color: var(--color-red);
+  }
+}
+
+.smart-model-modal{
+   pre, .model-note {
+    user-select: text;
+  }
+}
+
+/* Imported from: obsidian-smart-env/src/components/settings/style.css */
+.sc-env-settings-container {
+  margin: 1rem 0;
+}
+
+.smart-env-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.toggle-env-settings-btn {
+  cursor: pointer;
+}
+
+.setting-group .setting-items .setting-item.env-setting-highlight {
+  border: 1px solid var(--color-accent);
+  background-color: var(--interactive-hover);
+  padding: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.settings-group {
+  .setting-item {
+    border-top: none;
+  }
+}
+
+.sc-inline-confirm-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.gitignore-exclusion-source {
+  font-size: 0.8em !important;
+  color: var(--nav-item-color) !important;
+  background: var(--background-modifier-hover);
+  border-radius: 6px;
+  padding: 0.1rem 0.3rem;
+}
+
+.smart-fuzzy-header {
+  max-height: 300px;
+  overflow-y: auto;
+}
+/* Imported from: obsidian-smart-env/src/views/settings.css */
+/* The PRO badge button */
+.pro-setting .smart-plugin-pro-badge {
+  appearance: none;
+
+  /* layout */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  margin-left: 0.4em;
+  padding: 0.08em 0.55em;
+  border-radius: 999px;
+  white-space: nowrap;
+  vertical-align: middle;
+  pointer-events: auto;
+  cursor: pointer;
+
+  /* typography */
+  font-family: inherit;
+  font-size: 0.7em;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  line-height: 1;
+
+  /* color system: only Obsidian variables */
+  background-color: var(--color-accent);
+  background-image: linear-gradient(
+    135deg,
+    var(--color-accent),
+    var(--interactive-accent-hover)
+  );
+  color: var(--text-on-accent, var(--background-primary));
+  border: 1px solid var(--background-modifier-border);
+
+  /* subtle separation & depth, theme-aware */
+  box-shadow:
+    0 0 0 1px var(--background-primary),
+    0 1px 3px rgba(0, 0, 0, 0.35);
+  transform: translateY(-0.03em);
+}
+
+/* Interactive refinement: follow Obsidian's accent hover behavior */
+.pro-setting .smart-plugin-pro-badge:hover {
+  background-color: var(--interactive-accent-hover);
+  filter: brightness(1.05);
+}
+
+.pro-setting .smart-plugin-pro-badge:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.smart-plugin-settings-header .actions-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pill-padding-y);
+}
+
+.setting-component:has(.dropdown-no-options) {
+  display: none;
+}
+
+/* wrap Obsidian native styles within smart plugin settings main class */
+.smart-plugin-settings-main, .smart-plugin-settings-env {
+  .setting-group {
+    margin-top: var(--size-4-6);
+    margin-bottom: var(--size-4-6);
+  }
+  /* polyfill */
+  .setting-group .setting-items {
+    background-color: var(--setting-items-background, var(--background-primary-alt));
+    padding: var(--setting-items-padding, var(--size-4-5));
+    border-radius: var(--setting-items-radius, var(--radius-l));
+    border: var(--setting-items-border-width, 0) solid var(--setting-items-border-color, var(--background-modifier-border));
+  }
+}
+
+/* show icon for all smart-* plugins except the main smart environment settings tab */
+.vertical-tab-header-group-items[data-section="community-plugins"] [data-setting-id^="smart-"]:not([data-setting-id^="smart-environment"]) .vertical-tab-nav-item-icon {
+  display: flex;
+}
+/* Imported from: plugin/src/components/connections-graph/v1.css */
+.connections-graph {
+  position: relative;
+  width: 100%;
+  block-size: auto;
+  container-type: inline-size;
+}
+
+.sc-graph-svg {
+  width: 100%;
+  aspect-ratio: 1 / 1; /* keep square; height follows width */
+  height: auto;
+  display: block;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--background-modifier-hover) 50%, transparent);
+}
+
+/* Details mount */
+.sc-graph-details {
+  margin-block-start: 10px;
+}
+
+/* Nodes (small, Obsidian-like) */
+.sc-graph-node .sc-graph-node-dot {
+  fill: var(--background-primary);
+  stroke: var(--color-base-100);
+  stroke-width: 1.25px;
+  transition: stroke-width 120ms ease, stroke 120ms ease, fill 120ms ease;
+}
+
+.sc-graph-node-center .sc-graph-node-dot {
+  fill: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-primary));
+  stroke: var(--interactive-accent);
+  stroke-width: 1.5px;
+}
+
+.sc-graph-node-hover .sc-graph-node-dot {
+  fill: var(--background-modifier-hover);
+  stroke: var(--text-accent);
+  stroke-width: 2px;
+}
+
+/* Score as native SVG text */
+.sc-score-text {
+  font-size: 0.8em;
+  fill: var(--text-muted);
+  opacity: 0.95;
+  pointer-events: none;
+  user-select: none;
+}
+
+.sc-graph-node-hover .sc-score-text {
+  display: none;
+}
+
+/* Label text */
+.sc-node-label {
+  font-size: 0.85em;
+  font-weight: 500;
+  fill: var(--nav-item-color);
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+  paint-order: stroke fill;
+  stroke: color-mix(in srgb, var(--background-primary) 65%, transparent);
+  stroke-width: 2px;
+  transition: opacity 120ms ease-in-out;
+}
+
+.sc-graph-node-hover .sc-node-label {
+  opacity: 0.96;
+  fill: var(--nav-item-color-active);
+}
+
+/* Explicitly hide any label rendered for the center (defense-in-depth) */
+.connections-list-container .connections-graph-container .connections-graph .sc-graph-node-center .sc-node-label {
+  display: none;
+}
+
+/* Pinned state */
+.sc-graph-node.sc-result-pinned .sc-graph-node-dot {
+  fill: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
+  stroke: var(--interactive-accent);
+  stroke-width: 2px;
+  filter: drop-shadow(0 0 0.25rem color-mix(in srgb, var(--interactive-accent) 50%, transparent));
+}
+
+.sc-graph-node.sc-result-hidden .sc-graph-node-dot {
+  fill: color-mix(in srgb, var(--background-modifier-border) 40%, transparent);
+  stroke: color-mix(in srgb, var(--text-muted) 65%, transparent);
+  stroke-width: 1px;
+  opacity: 0.6;
+}
+
+/* Hidden nodes: scores always visible but muted */
+.sc-graph-node.sc-result-hidden .sc-score-text {
+  opacity: 0.4;
+  fill: var(--text-faint);
+}
+
+/* Hidden nodes: labels only appear on hover, with a softer style */
+.sc-graph-node.sc-result-hidden.sc-graph-node-hover .sc-node-label {
+  opacity: 0.85;
+  fill: var(--text-faint);
+}
+
+.sc-node-drag-handle-inner {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.sc-node-drag-handle-inner:active {
+  cursor: grabbing;
+}
+
+/* Imported from: plugin/src/components/connections-list-item/v3.css */
+.sc-result a.sc-result-file-title {
+  text-decoration: none;
+}
+
+.sc-result a.sc-result-file-title > small.sc-score {
+  display: inline-block;
+  width: auto;
+  height: 1.7em;
+  padding: 0 0.3em;
+  line-height: 1.7em;
+  text-align: center;
+  font-weight: 600;
+  font-size: var(--font-smallest);
+  color: var(--nav-item-color);
+  background: var(--background-modifier-hover);
+  border-radius: 6px;
+  margin-right: 0.2em;
+}
+
+a.sc-result-file-title > small.sc-title {
+  font-weight: 500;
+  text-decoration: underline;
+}
+
+a.sc-result-file-title > .sc-breadcrumb:not(.sc-title, .sc-score) {
+  font-style: italic;
+}
+
+a.sc-result-file-title > small.sc-breadcrumb-separator {
+  color: color-mix(in srgb, var(--text-normal) 50%, transparent);
+}
+
+.sc-result.sc-result-hidden-by-feedback {
+  display: none;
+}
+
+.sc-result.sc-result-graph-focus {
+  outline: 2px solid color-mix(in srgb, var(--interactive-accent) 70%, transparent);
+  border-radius: var(--radius-s);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--background-primary) 80%, transparent),
+    0 0 0.5rem color-mix(in srgb, var(--interactive-accent) 45%, transparent);
+  transition: outline 120ms ease, box-shadow 120ms ease;
+}
+
+/* hide separator if immediately preceded by score */
+.sc-result {
+  small.sc-score + .sc-breadcrumb-separator {
+    display: none;
+  }
+}
+/* Imported from: plugin/src/components/connections-view/v3.css */
+.connections-view-early {
+  &.is-drag-over {
+    border-radius: var(--radius-s);
+    background: color-mix(in srgb, var(--interactive-accent) 6%, transparent);
+    box-shadow: inset 0 0 0 2px var(--interactive-accent);
+  }
+
+  .connections-top-bar {
+    display: flex;
+    gap: 0.5rem 1rem;
+
+    .connections-actions {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      flex: 0 0 auto;
+    }
+
+    .sc-context {
+      display: flex;
+      flex-direction: column;
+      margin: 0;
+      gap: 0.1rem;
+      width: auto;
+      flex: 1 1 auto;
+
+      .sc-context-line {
+        line-height: 1.1;
+      }
+
+      .sc-context-line--parent {
+        color: var(--text-muted);
+        font-size: 0.85em;
+      }
+
+      .sc-context-line--focus {
+        color: var(--text-normal);
+        font-size: 1.05em;
+        font-weight: 600;
+      }
+
+    }
+  }
+  .connections-list {
+    padding-top: 0.85rem;
+
+    > .sc-collapsed ul {
+      display: none;
+    }
+    > .sc-collapsed span svg {
+      transform: rotate(-90deg);
+    }
+    > .sc-result-pinned {
+      box-shadow: 0 0 0 1px var(--interactive-accent);
+      border-radius: var(--radius-s);
+      background-color: var(--background-modifier-hover);
+    }
+  }
+}
+
+/* ===== embedded smart-connections-visualizer ===== */
+/* .connections-graph.lc-visualizer-graph (0,2,0): the classic renderer injects
+   its own <style> with .connections-graph { block-size: auto } after this sheet,
+   which would collapse the visualizer box to 0px once a classic graph has rendered */
+.connections-graph.lc-visualizer-graph {
+  height: 300px;
+  block-size: 300px;
+  min-height: 300px;
+  position: relative;
+  overflow: visible; /* let the gear menu overlay the list below instead of clipping at 300px */
+}
+.lc-visualizer-graph svg {
+  display: block;
+  overflow: hidden;
+}
+.lc-visualizer-graph .sc-visualizer-dropdown-menu {
+  max-height: min(75vh, 720px);
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+/* tighter gap between the graph (either renderer) and the connections list (stock: 0.85rem) */
+.sc-connections-view .connections-graph-container + .connections-list.sc-list {
+  padding-top: 0.2rem;
+}
+.sc-connections-view .connections-graph-container .connections-graph {
+  margin-bottom: 0;
+}
+/* gear button: icon only (stock draws a bordered, padded box) */
+.lc-visualizer-graph .smart-connections-visualizer-settings-icon {
+  border: none;
+  padding: 2px;
+  background: transparent;
+}
+/* gear menu header: "Graph Settings" title left, reset/close icons right */
+.lc-visualizer-graph .smart-connections-visualizer-menu-header {
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.lc-visualizer-menu-title {
+  flex: 1 1 auto;
+  font-weight: 600;
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+}
+/* SCV sets link stroke via CSS (beats the SVG attribute) using the dim border colour; use the text colour instead */
+.lc-visualizer-graph .smart-connections-visualizer-link {
+  stroke: var(--text-normal);
+  stroke-opacity: 0.8;
+}
+.lc-visualizer-graph .smart-connections-visualizer-link.lc-wikilink {
+  stroke: var(--color-blue, #2f81f7);
+  stroke-opacity: 0.9;
+}
+/* force graph: in-graph empty state (replaces SCV's transient Notice) */
+.lc-visualizer-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4em;
+  padding: 1em 3.5em;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  pointer-events: none;
+}
+.lc-visualizer-empty-title {
+  color: var(--text-normal);
+  font-weight: 600;
+}
+/* classic graph lines: semantic connections (centre -> result) and existing note links */
+.sc-graph-link {
+  pointer-events: none;
+}
+.sc-graph-link-score {
+  stroke: var(--text-normal);
+  stroke-opacity: 0.55;
+}
+.sc-graph-link-wikilink {
+  stroke: var(--color-blue, #2f81f7);
+  stroke-opacity: 0.9;
+}
+.sc-graph-link-hidden {
+  stroke-opacity: 0.2;
+}
+/* classic graph labels always visible (stock hides them until hover; the
+   stock rules also come from an injected <style>, hence the specificity) */
+.connections-graph .sc-graph-node .sc-node-label {
+  opacity: 0.9;
+}
+.connections-graph .sc-graph-node.sc-graph-node-hover .sc-node-label {
+  opacity: 1;
+}
+.connections-graph .sc-graph-node.sc-result-hidden .sc-node-label {
+  opacity: 0.45;
+  fill: var(--text-faint);
+}
+.connections-graph .sc-graph-node.sc-graph-node-hover .sc-score-text {
+  display: initial; /* label no longer overlaps the score, keep it */
+}
+
+.smart-connections-visualizer-link {
+    stroke: var(--background-modifier-border);
+    stroke-opacity: 1;
+    cursor: pointer;
+}
+.smart-connections-visualizer-label {
+    pointer-events: none;
+    fill: var(--text-normal);
+    font-family: 'Inter';
+}
+.smart-connections-visualizer-link-label {
+    font-family: 'Inter';
+}
+
+.smart-connections-visualizer-node:hover {
+    stroke: #fff;
+    cursor: pointer;
+    stroke-width: 0.4px;
+}
+
+svg .smart-connections-visualizer-nodes circle {
+    cursor: pointer;
+}
+
+.smart-connections-visualizer-node {
+    cursor: pointer;
+}
+
+.smart-connections-visualizer-settings-icon {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    cursor: pointer;
+    font-size: 24px;
+    color: #bbb;
+    z-index: 999; /* Ensure the icon stays above other elements */
+}
+.sc-visualizer-dropdown-menu {
+    font-family: 'Cascadia';
+    display: none;
+    position: absolute;
+    top: 13px; /* Position on top of the settings icon */
+    right: 10px;
+    background-color: #333;
+    border: 1px solid #444;
+    border-radius: 5px;
+    padding: 10px;
+    width: 300px;
+    z-index: 1000; /* Ensure the menu stays above other elements */
+}
+.sc-visualizer-dropdown-menu {
+    background-color: rgba(51, 51, 51, 0.9) !important;
+}
+
+.sc-visualizer-dropdown-menu.visible {
+    display: block !important;
+}
+.sc-visualizer-dropdown-menu.open {
+    display: block !important;
+}
+.smart-connections-visualizer-menu-header {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 5px;
+    font-family: sans-serif;
+}
+.smart-connections-visualizer-menu-header .smart-connections-visualizer-icon {
+    cursor: pointer;
+    font-size: 19px;
+    color: #bbb;
+    margin-left: 10px;
+    margin-top: -2px;
+}
+.smart-connections-visualizer-menu-header .smart-connections-visualizer-icon:hover {
+    color: #fff;
+}
+.smart-connections-visualizer-accordion-item {
+    margin-bottom: 10px;
+    color: #a3aecb;
+}
+
+.smart-connections-visualizer-slider {
+    width: 100% !important;
+}
+
+.smart-connections-visualizer-slider-container {
+    margin-bottom: 8px;
+}
+
+.smart-connections-visualizer-score-threshold-label {
+    text-wrap: nowrap;
+}
+
+#smart-connections-visualizer-refresh-icon {
+    font-size: 28px;
+    margin-top: -2px;
+    width: 20px;
+    height: 20px;
+    display: flex;
+}
+
+.smart-connections-visualizer-lucide-x {
+    height: 24px !important;
+    width: 24px !important;
+}
+
+.smart-connections-visualizer-settings-icon {
+    -webkit-app-region: no-drag;
+    background-color: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border-radius: 1px;
+    color: #7c849c;
+    /* opacity: var(--icon-opacity); */
+    transition: opacity 0.15s ease-in-out;
+    height: auto;
+    border: 1px solid #434851;
+    position: absolute;
+    padding: 8px;
+    top: 14px;
+    right: 14px;
+}
+
+.smart-connections-visualizer-accordion-header {
+    cursor: pointer;
+    background-color: #444;
+    color: #fff;
+    padding: 10px;
+    border-radius: 5px;
+    display: block;
+    align-items: center;
+}
+.smart-connections-visualizer-accordion-header:hover {
+    background-color: #555;
+}
+.smart-connections-visualizer-accordion-content {
+    display: none;
+    padding: 10px;
+    background-color: #333;
+    border-radius: 5px;
+}
+.smart-connections-visualizer-accordion-content.show {
+    display: block;
+}
+.smart-connections-visualizer-dropdown-indicator {
+    width: 16px;
+    height: 16px;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+
+.smart-connections-visualizer-radio-container {
+    margin-top: 10px;
+}
+
+.smart-connections-visualizer-radio-container label {
+    margin-right: 10px;
+    color: #a3aecb;
+}
+
+.smart-connections-visualizer-settings-item-content-label {
+    margin-right: 20px;
+}
+
+.smart-connections-visualizer-selection-box {
+    stroke: #00f;
+    stroke-width: 1;
+    fill: rgba(0, 0, 255, 0.3);
+}
+
+/* Styles for the legend container */
+.smart-connections-visualizer-legend-container {
+    width: 295px;
+    border-collapse: collapse;
+    background-color: #2d3039; /* Dark background color similar to settings menu */
+    color: #a3aecb; /* Light text color similar to settings menu */
+    position: absolute;
+    top: 14;
+    left: 10;
+}
+
+/* Styles for the legend header */
+.smart-connections-visualizer-legend-header {
+    display: flex;
+    background-color: #303030; /* Darker background color for header */
+    text-align: left;
+    /* border-bottom: 1px solid #ddd; */
+}
+
+/* Styles for each header cell in the legend */
+.smart-connections-visualizer-legend-header div {
+    padding: 8px;
+}
+
+/* Styles for each row in the legend */
+.smart-connections-visualizer-legend-row {
+    display: flex;
+    align-items: center;
+    /* border-bottom: 1px solid #ddd; */
+}
+
+/* Alternate row coloring for better readability */
+.smart-connections-visualizer-legend-row:nth-child(even) {
+    background-color: #3d4149; /* Slightly lighter row color for contrast */
+}
+
+.smart-connections-visualizer-legend-row:nth-child(odd) {
+    background-color: #2d3039; /* Same as container background color */
+}
+
+/* Styles for each cell in the row */
+.smart-connections-visualizer-legend-row div {
+    padding: 8px;
+}
+
+/* Styles for the color picker input */
+.smart-connections-visualizer-legend-color-picker {
+    width: 30px;
+    height: 30px;
+    border: none;
+    cursor: pointer;
+}
+
+.smart-connections-visualizer-variable-col {
+    flex: 2;
+}
+
+.smart-connections-visualizer-count-col {
+    flex: 1;
+    text-align: center;
+}
+
+.smart-connections-visualizer-color-col {
+    flex: 1;
+    text-align: center;
+}
+
+/* ===== local connections: settings cleanup + local models ===== */
+.lc-env-settings-section {
+  margin-top: var(--size-4-8);
+}
+.lc-local-models {
+  margin-top: var(--size-4-6);
+}
+.lc-local-models__help {
+  margin: var(--size-4-2) 0 var(--size-4-4);
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+.lc-local-models__help summary {
+  cursor: pointer;
+  color: var(--text-normal);
+}
+.lc-local-models__help h4 {
+  margin: var(--size-4-3) 0 var(--size-4-1);
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+}
+.lc-local-models__help p {
+  margin: var(--size-4-1) 0;
+}
+.lc-local-models__help pre {
+  font-size: var(--font-ui-smaller);
+  background: var(--background-primary-alt);
+  padding: var(--size-4-2);
+  border-radius: var(--radius-s);
+  overflow-x: auto;
+  user-select: text;
+}
+.lc-local-models__help code {
+  user-select: text;
+}
+.lc-local-models__status {
+  padding: 0 0 var(--size-4-2);
+}
+.lc-local-model .setting-item-name {
+  overflow-wrap: anywhere;
+}
+.lc-local-model__badge {
+  margin-left: 0.5em;
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-accent);
+}
+.lc-local-model__profile {
+  border-top: none;
+  padding-top: 0;
+}
+.lc-local-model__profile .setting-item-control {
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+}
+.lc-local-model__profile .setting-item-control input[type="text"] {
+  width: 11em;
+}
+.lc-local-model__confirm {
+  padding: 0 0 var(--size-4-3);
+  flex-wrap: wrap;
+}
+
+/* ===== local connections: semantic search ===== */
+.lc-search-panel {
+  margin-top: var(--size-2-2);
+  padding-top: var(--size-4-2);
+  border-top: 1px solid var(--background-modifier-border);
+}
+/* the connections list ends with its last row's bottom margin; pull the panel up into it */
+.sc-connections-view .connections-list-container + .lc-search-panel {
+  margin-top: 0;
+}
+/* tighter gap between the search row and the results (the shared .connections-list rule adds 0.85rem) */
+.sc-connections-view .lc-search-panel .lc-search-list.connections-list {
+  padding-top: var(--size-2-2);
+}
+.lc-search-row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+.lc-search-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+.lc-search-icon svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+.lc-search-row .lc-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.lc-search-row .lc-search-graph-toggle {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+.lc-search-panel-summary {
+  padding-top: var(--size-2-1);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lc-search-panel-summary:empty {
+  display: none;
+}
+.lc-search-graph-toggle.is-active {
+  color: var(--text-accent);
+  background-color: var(--background-modifier-hover);
+}
+.lc-search-status {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-2-2) 0;
+  color: var(--text-muted);
+}
+.lc-search-status.is-error {
+  color: var(--text-error);
+}
+.lc-search-status progress {
+  width: 3rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+}
+.lc-search-list .sc-no-results {
+  color: var(--text-muted);
+}
+.lc-search-graph-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  padding: var(--size-2-2) 0;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.lc-search-graph-caption span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lc-search-graph-caption button {
+  flex: 0 0 auto;
+  height: auto;
+  padding: 0 var(--size-4-2);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.8;
+}
+/* ===== local connections: vault graph ===== */
+.lc-vault-graph-view {
+  padding: 0;
+  overflow: hidden;
+}
+.lc-vault-graph {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.lc-vault-graph-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-2-2) var(--size-4-2);
+  padding: var(--size-2-3) var(--size-4-3);
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.lc-vault-graph-toolbar .clickable-icon.is-active {
+  color: var(--text-accent);
+  background-color: var(--background-modifier-hover);
+}
+.lc-vault-graph-sep {
+  width: 1px;
+  height: 1.4em;
+  background: var(--background-modifier-border);
+}
+.lc-vault-graph-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  white-space: nowrap;
+}
+.lc-vault-graph-field input[type="number"] {
+  width: 4.5em;
+}
+.lc-vault-graph-threshold-field b {
+  font-weight: 500;
+  color: var(--text-normal);
+  font-variant-numeric: tabular-nums;
+}
+.lc-vault-graph-toolbar input[type="range"] {
+  width: 9em;
+  margin: 0;
+}
+.lc-vault-graph-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  white-space: nowrap;
+}
+.lc-vault-graph-toolbar .lc-vault-graph-find {
+  width: 11em;
+  font-size: var(--font-ui-smaller);
+}
+.lc-vault-graph-status {
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.lc-vault-graph-status.is-busy::before {
+  content: "";
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-right: var(--size-2-2);
+  border-radius: 50%;
+  border: 2px solid var(--text-faint);
+  border-top-color: var(--text-accent);
+  vertical-align: -0.05em;
+  animation: lc-vault-graph-spin 0.8s linear infinite;
+}
+@keyframes lc-vault-graph-spin {
+  to { transform: rotate(360deg); }
+}
+.lc-vault-graph-status.is-error {
+  color: var(--text-error);
+}
+.lc-vault-graph-stale {
+  color: var(--text-accent);
+  cursor: pointer;
+}
+.lc-vault-graph-content {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--background-primary);
+}
+.lc-vault-graph-canvas {
+  display: block;
+  position: absolute;
+  inset: 0;
+}
+.lc-vault-graph-legend {
+  position: absolute;
+  top: var(--size-4-2);
+  left: var(--size-4-2);
+  max-height: calc(100% - 2 * var(--size-4-2));
+  max-width: 16em;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--size-2-2);
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--background-primary) 82%, transparent);
+  font-size: var(--font-ui-smaller);
+}
+.lc-vault-graph-legend:empty {
+  display: none;
+}
+.lc-vault-graph-legend-row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  height: auto;
+  padding: 1px var(--size-2-2);
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lc-vault-graph-legend-row:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.lc-vault-graph-legend-dot {
+  flex: 0 0 auto;
+  width: 0.7em;
+  height: 0.7em;
+  border-radius: 50%;
+}
+.lc-vault-graph-legend-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lc-vault-graph-legend-count {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.lc-vault-graph-hint {
+  position: absolute;
+  left: var(--size-4-2);
+  right: var(--size-4-2);
+  bottom: var(--size-2-2);
+  pointer-events: none;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lc-vault-graph-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--size-4-2);
+  padding: var(--size-4-6);
+  text-align: center;
+  color: var(--text-muted);
+}
+.lc-vault-graph-empty-title {
+  font-weight: 600;
+  color: var(--text-normal);
+}
