@@ -1,4 +1,4 @@
-/*! local-connections v1.10.1 | private local-only fork of smart-connections-obsidian v4.7.2 (c) Brian Petro, MIT | phone-home code removed; embeddings are local-only upstream as of 4.7.x */
+/*! local-connections v1.10.2 | private local-only fork of smart-connections-obsidian v4.7.2 (c) Brian Petro, MIT | phone-home code removed; embeddings are local-only upstream as of 4.7.x */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -20924,6 +20924,17 @@ function resolve_dropped_connections_targets(env, data_transfer) {
 }
 
 // src/components/connections-view/v3.js
+// Local Connections: menu items that act on a connections list's results; with
+// no note open they are shown greyed out (the rest — settings, graph style,
+// vault graph, random note — work without one). Items are tagged with their
+// action key by add_item(); "Copy as list", "Unhide all" and "Unpin all"
+// already disable themselves through their own disabled() checks.
+var LC_LIST_ONLY_MENU_ACTIONS = /* @__PURE__ */ new Set(["connections_list_refresh", "connections_list_toggle_expanded"]);
+function lc_disable_list_only_menu_items(menu) {
+  for (const item of menu?.items || []) {
+    if (LC_LIST_ONLY_MENU_ACTIONS.has(item?._action_key)) item.setDisabled?.(true);
+  }
+}
 var CONNECTIONS_TARGET_HISTORY_LIMIT = 10;
 async function build_html34(view, opts = {}) {
   const is_paused = Boolean(view.paused);
@@ -20981,13 +20992,13 @@ async function post_process33(view, container, opts = {}) {
   const sc_top_bar_context = container.querySelector(".sc-top-bar .sc-context");
   const env = view.env;
   let connections_item = opts.connections_item;
-  if (!connections_item) {
-    list_container.textContent = "No source item detected for current active view.";
-    return container;
-  }
-  let connections_list = connections_item.connections || env.connections_lists.new_item(connections_item);
-  const connections_settings = opts.connections_settings ?? connections_list?.settings;
-  record_connections_target_history(view, connections_item);
+  // Local Connections: with no note open there is no connections list, but the
+  // top bar (menu, change target, drop target) must still work — the listeners
+  // are attached below before the early return, and the menu is built against
+  // the collection with the result-dependent items greyed out.
+  let connections_list = connections_item ? connections_item.connections || env.connections_lists.new_item(connections_item) : null;
+  const connections_settings = opts.connections_settings ?? connections_list?.settings ?? env.connections_lists?.settings;
+  if (connections_item) record_connections_target_history(view, connections_item);
   container._connections_menu_state = {
     view,
     container,
@@ -21025,7 +21036,7 @@ async function post_process33(view, container, opts = {}) {
       env.build_menu?.(
         "connections:list_menu",
         menu,
-        state.connections_list,
+        state.connections_list || env.connections_lists,
         {
           container: state.container,
           connections_settings: state.connections_settings,
@@ -21033,6 +21044,7 @@ async function post_process33(view, container, opts = {}) {
           render_connections: state.view.render_view.bind(state.view)
         }
       );
+      if (!state.connections_list) lc_disable_list_only_menu_items(menu);
       menu.showAtMouseEvent(event);
     });
     const open_target_menu = (event) => {
@@ -21090,6 +21102,10 @@ async function post_process33(view, container, opts = {}) {
     container.addEventListener("dragover", on_target_dragover);
     container.addEventListener("dragleave", on_target_dragleave);
     container.addEventListener("drop", on_target_drop);
+  }
+  if (!connections_item) {
+    list_container.textContent = "No source item detected for current active view.";
+    return container;
   }
   const connections_list_component_key = opts.connections_list_component_key || connections_list.connections_list_component_key || "connections_list_v4";
   const list = await env.smart_components.render_component(connections_list_component_key, connections_list, {
