@@ -1,4 +1,4 @@
-/*! local-connections v1.9.2 | private local-only fork of smart-connections-obsidian v4.7.2 (c) Brian Petro, MIT | phone-home code removed; embeddings are local-only upstream as of 4.7.x */
+/*! local-connections v1.10.0 | private local-only fork of smart-connections-obsidian v4.7.2 (c) Brian Petro, MIT | phone-home code removed; embeddings are local-only upstream as of 4.7.x */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -30332,7 +30332,20 @@ var LC_VAULT_GRAPH_DEFAULTS = {
   neighbours: 2,
   // nearest neighbours linked per note (0 = none)
   show_wikilinks: true,
-  show_cluster_links: true
+  show_cluster_links: true,
+  layout: "force",
+  // "force" = the original spring layout; "pca" / "knn" = projected layouts (v1.10.0, lc_vault_graph_layout)
+  cluster_naming: "centroid"
+  // "centroid" = the note nearest the centroid (original); "keywords" = TF-IDF over member titles (v1.10.0)
+};
+var LC_VAULT_GRAPH_LAYOUTS = {
+  force: "Springs (physics)",
+  pca: "PCA projection",
+  knn: "Neighbour embedding (UMAP-style)"
+};
+var LC_VAULT_GRAPH_NAMINGS = {
+  centroid: "Nearest note",
+  keywords: "Keywords from titles"
 };
 var LC_VAULT_GRAPH_SETTINGS_CONFIG = {
   cluster_count: {
@@ -30362,6 +30375,20 @@ var LC_VAULT_GRAPH_SETTINGS_CONFIG = {
     name: "Show note links",
     type: "toggle",
     description: "Draw a blue line between notes that link to each other (wikilinks / markdown links, either direction)."
+  },
+  layout: {
+    name: "Layout",
+    type: "dropdown",
+    group: "Vault visualisation",
+    description: "Where the notes are placed. Springs (physics): the original force layout \u2014 distance on screen is spring equilibrium, not similarity. PCA projection: the two principal directions of the embedding vectors, so distance on screen is semantic distance (deterministic and cheap, but flattens a lot). Neighbour embedding: a UMAP-style layout driven by the neighbour links and the clusters, seeded from the PCA \u2014 better separated, and better with more neighbours per note. In both projected layouts the physics only untangles overlapping dots.",
+    options_callback: () => Object.entries(LC_VAULT_GRAPH_LAYOUTS).map(([value, name]) => ({ value, name }))
+  },
+  cluster_naming: {
+    name: "Cluster names",
+    type: "dropdown",
+    group: "Vault visualisation",
+    description: "Nearest note: each hub is named after the note nearest its centroid (the original). Keywords from titles: the two or three terms most specific to the cluster\u2019s note titles (TF-IDF across clusters), which stays meaningful at high cluster counts; the nearest note is still shown when hovering the hub and in the legend tooltip.",
+    options_callback: () => Object.entries(LC_VAULT_GRAPH_NAMINGS).map(([value, name]) => ({ value, name }))
   }
 };
 function lc_vault_graph_settings(env) {
@@ -30384,6 +30411,14 @@ function lc_vault_graph_neighbours(settings) {
 function lc_vault_graph_threshold(settings) {
   const t = Number(settings?.link_threshold);
   return Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : LC_VAULT_GRAPH_DEFAULTS.link_threshold;
+}
+function lc_vault_graph_layout(settings) {
+  const value = String(settings?.layout || "");
+  return Object.prototype.hasOwnProperty.call(LC_VAULT_GRAPH_LAYOUTS, value) ? value : LC_VAULT_GRAPH_DEFAULTS.layout;
+}
+function lc_vault_graph_naming(settings) {
+  const value = String(settings?.cluster_naming || "");
+  return Object.prototype.hasOwnProperty.call(LC_VAULT_GRAPH_NAMINGS, value) ? value : LC_VAULT_GRAPH_DEFAULTS.cluster_naming;
 }
 // --- Vector math (Float32, unit vectors) --------------------------------------
 function lc_vault_unit_vec(vec) {
@@ -30577,6 +30612,184 @@ async function lc_vault_knn(vecs = [], k = 2, opts = {}) {
   }
   return Array.from(links.values());
 }
+// --- Projection: PCA to 2-D (v1.10.0) ------------------------------------------------
+// The two dominant principal components of the mean-centred vectors, by power
+// iteration with Gram–Schmidt deflation. Nothing bigger than a few d-vectors is
+// materialised: the centring is applied algebraically (x·w − μ·w). Returns
+// { x, y } (Float32Array, centred on 0, in the vectors' own units) and the share
+// of the variance each axis explains.
+async function lc_vault_pca2(vecs = [], opts = {}) {
+  const n = vecs.length;
+  const d = n ? vecs[0].length : 0;
+  const tick = opts.tick || (async () => {});
+  const x = new Float32Array(n);
+  const y = new Float32Array(n);
+  if (n < 2 || !d) return { x, y, explained: [0, 0] };
+  const max_iter = opts.max_iter ?? 60;
+  const rand = prng_from_seed(opts.seed ?? 97);
+  const mean = new Float64Array(d);
+  let sq = 0;
+  for (let i = 0; i < n; i++) {
+    const v = vecs[i];
+    for (let j = 0; j < d; j++) {
+      mean[j] += v[j];
+      sq += v[j] * v[j];
+    }
+    if ((i & 255) === 0) await tick(0.02 * i / n);
+  }
+  let mean_sq = 0;
+  for (let j = 0; j < d; j++) {
+    mean[j] /= n;
+    mean_sq += mean[j] * mean[j];
+  }
+  const total_var = Math.max(0, sq / n - mean_sq);
+  const components = [];
+  const variances = [];
+  for (let c = 0; c < 2; c++) {
+    let w = new Float64Array(d);
+    let norm = 0;
+    for (let j = 0; j < d; j++) {
+      w[j] = rand() - 0.5;
+      norm += w[j] * w[j];
+    }
+    norm = Math.sqrt(norm) || 1;
+    for (let j = 0; j < d; j++) w[j] /= norm;
+    let eigen = 0;
+    for (let it = 0; it < max_iter; it++) {
+      const acc = new Float64Array(d);
+      let mw = 0;
+      for (let j = 0; j < d; j++) mw += mean[j] * w[j];
+      let s_sum = 0;
+      for (let i = 0; i < n; i++) {
+        const v = vecs[i];
+        const s = lc_vault_dot(v, w) - mw;
+        s_sum += s;
+        for (let j = 0; j < d; j++) acc[j] += s * v[j];
+        if ((i & 63) === 0) await tick(0.02 + 0.98 * (c * max_iter + it + i / n) / (2 * max_iter));
+      }
+      // acc = Σ s_i (v_i − μ) = XᵀX w; deflate against the components already found
+      for (let j = 0; j < d; j++) acc[j] -= s_sum * mean[j];
+      for (const prev of components) {
+        let p = 0;
+        for (let j = 0; j < d; j++) p += acc[j] * prev[j];
+        for (let j = 0; j < d; j++) acc[j] -= p * prev[j];
+      }
+      let len = 0;
+      for (let j = 0; j < d; j++) len += acc[j] * acc[j];
+      len = Math.sqrt(len);
+      if (!(len > 0)) break;
+      eigen = len / n;
+      let cos = 0;
+      for (let j = 0; j < d; j++) {
+        acc[j] /= len;
+        cos += acc[j] * w[j];
+      }
+      w = acc;
+      if (Math.abs(cos) > 1 - 1e-7) break;
+    }
+    components.push(w);
+    variances.push(eigen);
+  }
+  const [w1, w2] = components;
+  let m1 = 0, m2 = 0;
+  for (let j = 0; j < d; j++) {
+    m1 += mean[j] * w1[j];
+    m2 += mean[j] * w2[j];
+  }
+  for (let i = 0; i < n; i++) {
+    x[i] = lc_vault_dot(vecs[i], w1) - m1;
+    y[i] = lc_vault_dot(vecs[i], w2) - m2;
+  }
+  return { x, y, explained: total_var > 0 ? variances.map((v) => Math.min(1, v / total_var)) : [0, 0] };
+}
+// --- Projection: neighbour embedding, UMAP-style (v1.10.0) ---------------------------
+// A small stochastic neighbour embedding over links we already have: the
+// symmetric kNN edges (weighted by similarity) plus a weak edge from every note to
+// its cluster's centre note, so notes with few neighbours stay with their cluster.
+// Starts from the PCA projection (rescaled to a ~10-unit spread, UMAP's
+// convention), then runs UMAP's attraction / negative-sampling repulsion with
+// a = b = 1 (φ(d) = 1 / (1 + d²)) and a linearly decaying step. An edge with
+// weight w is visited in a fraction w of the epochs. Chunked with the ticker.
+async function lc_vault_knn_embed(init, edges = [], opts = {}) {
+  const n = init?.x?.length || 0;
+  const x = new Float32Array(n);
+  const y = new Float32Array(n);
+  if (n < 2) return { x, y };
+  const tick = opts.tick || (async () => {});
+  const epochs = Math.max(1, Math.round(opts.epochs ?? 200));
+  const negatives = Math.max(0, Math.round(opts.negatives ?? 4));
+  const rand = prng_from_seed(opts.seed ?? 31);
+  let max_abs = 0;
+  for (let i = 0; i < n; i++) max_abs = Math.max(max_abs, Math.abs(init.x[i]), Math.abs(init.y[i]));
+  const scale = max_abs > 0 ? 10 / max_abs : 1;
+  for (let i = 0; i < n; i++) {
+    x[i] = init.x[i] * scale + (rand() - 0.5) * 0.01;
+    y[i] = init.y[i] * scale + (rand() - 0.5) * 0.01;
+  }
+  const m = edges.length;
+  const src = new Int32Array(m);
+  const dst = new Int32Array(m);
+  const wgt = new Float32Array(m);
+  for (let e = 0; e < m; e++) {
+    src[e] = edges[e].source;
+    dst[e] = edges[e].target;
+    const w = Number(edges[e].weight);
+    wgt[e] = Number.isFinite(w) ? Math.max(0, Math.min(1, w)) : 1;
+  }
+  const clip = (v) => v > 4 ? 4 : v < -4 ? -4 : v;
+  for (let epoch = 0; epoch < epochs; epoch++) {
+    const lr = 1 - epoch / epochs;
+    for (let e = 0; e < m; e++) {
+      if (wgt[e] < 1 && rand() > wgt[e]) continue;
+      const i = src[e];
+      const j = dst[e];
+      if (i === j || i < 0 || j < 0 || i >= n || j >= n) continue;
+      let dx = x[i] - x[j];
+      let dy = y[i] - y[j];
+      let d2 = dx * dx + dy * dy;
+      let coeff = -2 / (1 + d2);
+      const gx = clip(coeff * dx) * lr;
+      const gy = clip(coeff * dy) * lr;
+      x[i] += gx;
+      y[i] += gy;
+      x[j] -= gx;
+      y[j] -= gy;
+      for (let s = 0; s < negatives; s++) {
+        const k = Math.floor(rand() * n);
+        if (k === i || k === j) continue;
+        dx = x[i] - x[k];
+        dy = y[i] - y[k];
+        d2 = dx * dx + dy * dy;
+        coeff = 2 / ((1e-3 + d2) * (1 + d2));
+        x[i] += clip(coeff * dx) * lr;
+        y[i] += clip(coeff * dy) * lr;
+      }
+    }
+    await tick(epoch / epochs);
+  }
+  return { x, y };
+}
+// The edge list for lc_vault_knn_embed: neighbour links weighted by similarity,
+// plus a weak edge from each note to its cluster's centre note.
+function lc_vault_graph_embed_edges(notes = [], knn = [], clusters = [], cluster_weight = 0.2) {
+  const edges = [];
+  for (const l of knn || []) {
+    const s = Math.max(0, Math.min(1, Number(l.score)));
+    edges.push({ source: l.source, target: l.target, weight: Number.isFinite(s) ? Math.max(0.2, s) : 1 });
+  }
+  const index_of = /* @__PURE__ */ new Map();
+  notes.forEach((note, i) => index_of.set(note, i));
+  for (const cluster of clusters || []) {
+    const centre = index_of.get(cluster.center_note);
+    if (centre === void 0) continue;
+    for (const note of cluster.members) {
+      const i = index_of.get(note);
+      if (i === void 0 || i === centre) continue;
+      edges.push({ source: i, target: centre, weight: cluster_weight });
+    }
+  }
+  return edges;
+}
 // --- Data: notes with embeddings -> clusters --------------------------------------
 function lc_vault_graph_note_label(key = "") {
   return String(key).split("/").pop().replace(/\.md$/i, "");
@@ -30598,10 +30811,11 @@ function lc_vault_graph_collect_notes(env) {
   notes.sort((a, b) => a.id.localeCompare(b.id));
   return notes;
 }
-// Groups notes by k-means assignment; names each cluster after the note
-// nearest its centroid. Empty clusters (k-means can leave some) are dropped.
-function lc_vault_graph_build_clusters(notes, result) {
-  const clusters = result.centers.map((center, index) => ({ index, center, members: [], name: "", center_note: null }));
+// Groups notes by k-means assignment; finds the note nearest each centroid and
+// names the clusters (see lc_vault_graph_name_clusters). Empty clusters (k-means
+// can leave some) are dropped.
+function lc_vault_graph_build_clusters(notes, result, naming = "centroid") {
+  const clusters = result.centers.map((center, index) => ({ index, center, members: [], name: "", center_note: null, keywords: [] }));
   notes.forEach((note, i) => {
     const c = clusters[result.assign[i]];
     if (!c) return;
@@ -30616,9 +30830,82 @@ function lc_vault_graph_build_clusters(notes, result) {
       if (!best || note.cluster_sim > best.cluster_sim) best = note;
     }
     c.center_note = best;
-    c.name = best ? best.label : `Cluster ${c.index + 1}`;
   }
-  return kept;
+  return lc_vault_graph_name_clusters(kept, naming);
+}
+// Names the clusters in place: "centroid" = the label of the note nearest the
+// centroid (the original); "keywords" = the top TF-IDF terms of the member titles,
+// falling back to the centroid note when the titles yield nothing.
+function lc_vault_graph_name_clusters(clusters = [], naming = "centroid") {
+  const keywords = naming === "keywords" ? lc_vault_graph_keyword_names(clusters) : null;
+  const seen = /* @__PURE__ */ new Map();
+  const term_key = (c) => c.keywords.map((t) => t.toLowerCase()).sort().join("|");
+  clusters.forEach((c, i) => {
+    c.keywords = keywords ? keywords[i] : [];
+    const fallback = c.center_note ? c.center_note.label : `Cluster ${c.index + 1}`;
+    c.name = c.keywords.length ? c.keywords.join(" · ") : fallback;
+    if (c.keywords.length) seen.set(term_key(c), (seen.get(term_key(c)) || 0) + 1);
+  });
+  // two clusters with the same keywords, in any order (a topic split by
+  // k-means): tell them apart by their nearest note
+  if (keywords) {
+    for (const c of clusters) {
+      if (c.keywords.length && seen.get(term_key(c)) > 1 && c.center_note) c.name = `${c.name} (${c.center_note.label})`;
+    }
+  }
+  return clusters;
+}
+var LC_VAULT_GRAPH_STOP_WORDS = new Set("a an and are as at be but by for from has have he her his how i if in into is it its me my no not of on or our she so than that the their them then there these they this to too was we were what when where which who why will with you your about after before over under between through during without within via per vs versus some any all each every more most other such only also just untitled note notes new".split(" "));
+// Title -> Map(token -> display form). Tokens are letters/digits runs (Unicode),
+// lower-cased, at least three characters, not a stop word and not a bare number.
+function lc_vault_graph_title_terms(label = "") {
+  const out = /* @__PURE__ */ new Map();
+  for (const raw of String(label).split(/[^\p{L}\p{N}'\u2019]+/u)) {
+    const word = raw.replace(/^['\u2019]+|['\u2019]+$/g, "").replace(/['\u2019]s$/i, "");
+    const token = word.toLowerCase();
+    if (token.length < 3 || LC_VAULT_GRAPH_STOP_WORDS.has(token) || /^\p{N}+$/u.test(token)) continue;
+    if (!out.has(token)) out.set(token, word);
+  }
+  return out;
+}
+// TF-IDF over member titles. A term's weight in a cluster is the share of the
+// cluster's members whose title contains it, times log((K + 1) / df) where df is
+// the number of clusters (of K) containing it at all — a term found in every
+// cluster ("meeting", "notes") tells the clusters apart not at all and is skipped
+// (unless there is only one cluster). In clusters of four or more
+// notes a term must appear in at least two titles, and a term is listed only if
+// it carries at least a quarter of the top term's weight. Returns the top max_terms
+// display forms per cluster, best first.
+function lc_vault_graph_keyword_names(clusters = [], max_terms = 3) {
+  const per_cluster = clusters.map((c) => {
+    const counts = /* @__PURE__ */ new Map();
+    const forms = /* @__PURE__ */ new Map();
+    for (const note of c.members || []) {
+      for (const [token, form] of lc_vault_graph_title_terms(note.label)) {
+        counts.set(token, (counts.get(token) || 0) + 1);
+        if (!forms.has(token)) forms.set(token, form);
+      }
+    }
+    return { counts, forms };
+  });
+  const df = /* @__PURE__ */ new Map();
+  for (const { counts } of per_cluster) for (const token of counts.keys()) df.set(token, (df.get(token) || 0) + 1);
+  const K = clusters.length;
+  return per_cluster.map(({ counts, forms }, ci) => {
+    const size = clusters[ci].members?.length || 1;
+    const scored = [];
+    for (const [token, count] of counts) {
+      if (size >= 4 && count < 2) continue;
+      const cluster_df = df.get(token) || 1;
+      if (K >= 2 && cluster_df >= K) continue;
+      const weight = count / size * Math.log((K + 1) / cluster_df);
+      scored.push({ token, form: forms.get(token), weight, count });
+    }
+    scored.sort((a, b) => b.weight - a.weight || b.count - a.count || a.token.localeCompare(b.token));
+    // a slot is not filled with noise: a term must carry a quarter of the top term's weight
+    const floor = scored.length ? scored[0].weight * 0.25 : 0;
+    return scored.filter((s) => s.weight >= floor).slice(0, max_terms).map((s) => s.form);
+  });
 }
 // --- The view ----------------------------------------------------------------------
 var LC_VAULT_GRAPH_VIEW_TYPE = "lc-vault-graph";
@@ -30714,6 +31001,14 @@ var LcVaultGraphView = class extends SmartItemView {
     if (!this.lc_data) return;
     if (path.includes("cluster_count")) return void this.rebuild({ reason: "clusters", keep_notes: true });
     if (path.includes("neighbours")) return void this.rebuild({ reason: "neighbours", keep_notes: true, keep_clusters: true });
+    if (path.includes("layout")) return void this.rebuild({ reason: "layout", keep_notes: true, keep_clusters: true });
+    if (path.includes("cluster_naming")) {
+      if (!this.lc_data.clusters) return;
+      lc_vault_graph_name_clusters(this.lc_data.clusters, lc_vault_graph_naming(this.settings));
+      if (this.lc_graph?.refresh_labels) this.lc_graph.refresh_labels();
+      else this.rebuild({ reason: "naming", keep_notes: true, keep_clusters: true });
+      return;
+    }
     lc_vault_graph_apply_links(this);
   }
   is_cancelled(build_id) {
@@ -30735,7 +31030,7 @@ var LcVaultGraphView = class extends SmartItemView {
         await lc_vault_yield();
         if (is_cancelled()) return;
         const notes = lc_vault_graph_collect_notes(env);
-        data = { notes, clusters: null, knn: null, knn_k: -1, wikilinks: null };
+        data = { notes, clusters: null, knn: null, knn_k: -1, wikilinks: null, pca: null, projection: null };
         this.lc_data = data;
       }
       const notes = data.notes;
@@ -30755,7 +31050,7 @@ var LcVaultGraphView = class extends SmartItemView {
         const seed = Math.floor(hash_to_unit(notes.map((n) => n.id).join("|")) * 1e9);
         const result = await lc_vault_kmeans(vecs, k, { tick, seed });
         if (is_cancelled()) return;
-        data.clusters = lc_vault_graph_build_clusters(notes, result);
+        data.clusters = lc_vault_graph_build_clusters(notes, result, lc_vault_graph_naming(settings));
       }
       const neighbours = lc_vault_graph_neighbours(settings);
       if (data.knn_k !== neighbours) {
@@ -30771,6 +31066,36 @@ var LcVaultGraphView = class extends SmartItemView {
           data.knn = [];
         }
         data.knn_k = neighbours;
+      }
+      // projected layouts (v1.10.0): PCA once per note set; the neighbour
+      // embedding again whenever the neighbours or the clusters changed
+      const layout = lc_vault_graph_layout(settings);
+      if (layout !== "force") {
+        const p = data.projection;
+        const valid = p && p.layout === layout && (layout !== "knn" || p.knn_k === data.knn_k && p.clusters === data.clusters);
+        if (!valid) {
+          if (!data.pca) {
+            const tick = lc_vault_ticker({
+              is_cancelled,
+              on_progress: (p2) => lc_vault_graph_set_status(this, `Projecting ${notes.length.toLocaleString()} notes (PCA)… ${Math.round(p2 * 100)}%`, { busy: true })
+            });
+            lc_vault_graph_set_status(this, `Projecting ${notes.length.toLocaleString()} notes (PCA)…`, { busy: true });
+            data.pca = await lc_vault_pca2(vecs, { tick });
+            if (is_cancelled()) return;
+          }
+          let projection = data.pca;
+          if (layout === "knn") {
+            const tick = lc_vault_ticker({
+              is_cancelled,
+              on_progress: (p2) => lc_vault_graph_set_status(this, `Embedding by neighbours… ${Math.round(p2 * 100)}%`, { busy: true })
+            });
+            lc_vault_graph_set_status(this, "Embedding by neighbours…", { busy: true });
+            const edges = lc_vault_graph_embed_edges(notes, data.knn, data.clusters);
+            projection = await lc_vault_knn_embed(data.pca, edges, { tick });
+            if (is_cancelled()) return;
+          }
+          data.projection = { layout, knn_k: data.knn_k, clusters: data.clusters, x: projection.x, y: projection.y, explained: data.pca.explained };
+        }
       }
       if (!data.wikilinks) {
         lc_vault_graph_set_status(this, "Collecting note links…", { busy: true });
@@ -30811,6 +31136,18 @@ function lc_vault_graph_build_ui(view, container) {
         <option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
       </select>
     </label>
+    <label class="lc-vault-graph-field" title="Where notes are placed: springs (physics), a PCA projection of the vectors, or a UMAP-style neighbour embedding">
+      <span>Layout</span>
+      <select class="dropdown lc-vault-graph-layout">
+        <option value="force">Springs</option><option value="pca">PCA</option><option value="knn">Neighbours</option>
+      </select>
+    </label>
+    <label class="lc-vault-graph-field" title="How clusters are named: after the note nearest the centroid, or from keywords in the member titles">
+      <span>Names</span>
+      <select class="dropdown lc-vault-graph-naming">
+        <option value="centroid">Nearest note</option><option value="keywords">Keywords</option>
+      </select>
+    </label>
     <label class="lc-vault-graph-field lc-vault-graph-threshold-field" title="Neighbour links below this similarity are hidden">
       <span>Link threshold <b class="lc-vault-graph-threshold-value"></b></span>
       <input class="lc-vault-graph-threshold" type="range" min="0" max="1" step="0.01" />
@@ -30835,6 +31172,8 @@ function lc_vault_graph_build_ui(view, container) {
     fit: root.querySelector(".lc-vault-graph-fit"),
     clusters: root.querySelector(".lc-vault-graph-clusters"),
     neighbours: root.querySelector(".lc-vault-graph-neighbours"),
+    layout: root.querySelector(".lc-vault-graph-layout"),
+    naming: root.querySelector(".lc-vault-graph-naming"),
     threshold: root.querySelector(".lc-vault-graph-threshold"),
     threshold_value: root.querySelector(".lc-vault-graph-threshold-value"),
     spokes: root.querySelector(".lc-vault-graph-spokes"),
@@ -30884,6 +31223,20 @@ function lc_vault_graph_build_ui(view, container) {
     write("neighbours", value);
     view.rebuild({ reason: "neighbours", keep_notes: true, keep_clusters: true });
   });
+  ui.layout.addEventListener("change", () => {
+    const value = lc_vault_graph_layout({ layout: ui.layout.value });
+    ui.layout.value = value;
+    if (lc_vault_graph_layout(settings()) === value) return;
+    write("layout", value);
+    view.apply_settings_change("layout");
+  });
+  ui.naming.addEventListener("change", () => {
+    const value = lc_vault_graph_naming({ cluster_naming: ui.naming.value });
+    ui.naming.value = value;
+    if (lc_vault_graph_naming(settings()) === value) return;
+    write("cluster_naming", value);
+    view.apply_settings_change("cluster_naming");
+  });
   let threshold_timer = null;
   ui.threshold.addEventListener("input", () => {
     const value = Math.max(0, Math.min(1, Number(ui.threshold.value) || 0));
@@ -30921,6 +31274,8 @@ function lc_vault_graph_sync_controls(view, ui = view.lc_ui) {
   const count = Math.round(Number(settings.cluster_count)) || 0;
   if (ui.clusters.ownerDocument?.activeElement !== ui.clusters) ui.clusters.value = String(count);
   ui.neighbours.value = String(lc_vault_graph_neighbours(settings));
+  ui.layout.value = lc_vault_graph_layout(settings);
+  ui.naming.value = lc_vault_graph_naming(settings);
   const threshold = lc_vault_graph_threshold(settings);
   ui.threshold.value = String(threshold);
   ui.threshold_value.textContent = threshold.toFixed(2);
@@ -30994,11 +31349,28 @@ async function lc_vault_graph_mount(view, build_id) {
   theme.font = lc_vault_graph_font(theme);
   const notes = data.notes;
   const clusters = data.clusters;
+  const layout = lc_vault_graph_layout(view.settings);
+  // a projected layout (v1.10.0): every note is anchored to its projected point,
+  // scaled so the map is about the size the spring layout would be, and hubs sit
+  // at the mean of their members; the physics then only untangles overlaps
+  const projection = layout !== "force" && data.projection?.layout === layout ? data.projection : null;
   // -- nodes ----------------------------------------------------------------------
   const nodes = [];
   const node_map = /* @__PURE__ */ new Map();
   const hub_of = /* @__PURE__ */ new Map();
   const ring_r = Math.max(120, 60 * Math.sqrt(clusters.length) + 12 * Math.sqrt(notes.length));
+  let proj_scale = 1, proj_cx = 0, proj_cy = 0;
+  if (projection) {
+    for (let i = 0; i < notes.length; i++) {
+      proj_cx += projection.x[i];
+      proj_cy += projection.y[i];
+    }
+    proj_cx /= notes.length || 1;
+    proj_cy /= notes.length || 1;
+    let max_abs = 0;
+    for (let i = 0; i < notes.length; i++) max_abs = Math.max(max_abs, Math.abs(projection.x[i] - proj_cx), Math.abs(projection.y[i] - proj_cy));
+    proj_scale = max_abs > 0 ? 1.15 * ring_r / max_abs : 1;
+  }
   clusters.forEach((cluster, i) => {
     const angle = i / clusters.length * 2 * Math.PI - Math.PI / 2;
     const radius = Math.min(40, 10 + 2.2 * Math.sqrt(cluster.members.length));
@@ -31018,7 +31390,7 @@ async function lc_vault_graph_mount(view, build_id) {
     hub_of.set(cluster.index, hub);
   });
   const rand = prng_from_seed(4242);
-  for (const note of notes) {
+  notes.forEach((note, i) => {
     const hub = hub_of.get(note.cluster_index);
     const spread = hub ? 25 + 18 * Math.sqrt(hub.cluster.members.length) : 100;
     const angle = rand() * 2 * Math.PI;
@@ -31035,9 +31407,25 @@ async function lc_vault_graph_mount(view, build_id) {
       x: (hub ? hub.x : 0) + dist * Math.cos(angle),
       y: (hub ? hub.y : 0) + dist * Math.sin(angle)
     };
+    if (projection) {
+      node.x = node.px = (projection.x[i] - proj_cx) * proj_scale;
+      node.y = node.py = (projection.y[i] - proj_cy) * proj_scale;
+    }
     hub?.members.push(node);
     nodes.push(node);
     node_map.set(node.id, node);
+  });
+  if (projection) {
+    for (const hub of hub_of.values()) {
+      if (!hub.members.length) continue;
+      let sx = 0, sy = 0;
+      for (const m of hub.members) {
+        sx += m.px;
+        sy += m.py;
+      }
+      hub.x = hub.px = sx / hub.members.length;
+      hub.y = hub.py = sy / hub.members.length;
+    }
   }
   // -- links ----------------------------------------------------------------------
   // All candidate links are built once; apply_links() picks the visible subset
@@ -31068,7 +31456,11 @@ async function lc_vault_graph_mount(view, build_id) {
     if (link.kind === "neighbour") return 0.25;
     return 0.08;
   });
-  const simulation = d3.forceSimulation(nodes).velocityDecay(0.7).force("charge", d3.forceManyBody().strength((d) => d.type === "cluster" ? -600 : -45).distanceMax(500)).force("link", link_force).force("collide", d3.forceCollide((d) => d.radius + 2).strength(0.6).iterations(1)).force("x", d3.forceX(0).strength(0.015)).force("y", d3.forceY(0).strength(0.015)).stop();
+  // springs: the original layout. Projected: no charge and no springs — an
+  // anchor pulls every node back to its projected point and collision spreads
+  // dots that land on top of each other (link_force still receives the links so
+  // select_links() works the same; it is simply not attached to the simulation).
+  const simulation = projection ? d3.forceSimulation(nodes).velocityDecay(0.6).force("anchor_x", d3.forceX((d) => d.px).strength((d) => d.type === "cluster" ? 0.5 : 0.25)).force("anchor_y", d3.forceY((d) => d.py).strength((d) => d.type === "cluster" ? 0.5 : 0.25)).force("collide", d3.forceCollide((d) => d.radius + 1.5).strength(0.7).iterations(2)).stop() : d3.forceSimulation(nodes).velocityDecay(0.7).force("charge", d3.forceManyBody().strength((d) => d.type === "cluster" ? -600 : -45).distanceMax(500)).force("link", link_force).force("collide", d3.forceCollide((d) => d.radius + 2).strength(0.6).iterations(1)).force("x", d3.forceX(0).strength(0.015)).force("y", d3.forceY(0).strength(0.015)).stop();
   const select_links = () => {
     const settings = view.settings;
     const threshold = lc_vault_graph_threshold(settings);
@@ -31080,7 +31472,8 @@ async function lc_vault_graph_mount(view, build_id) {
     // via a hidden copy so clusters do not drift apart when the user hides them
     const force_links = settings.show_cluster_links === false ? links.concat(spoke_links) : links;
     link_force.links(force_links);
-    view.lc_summary = `${notes.length.toLocaleString()} notes · ${clusters.length} clusters · ${links.length.toLocaleString()} links`;
+    const layout_tag = layout === "pca" ? ` · PCA layout${projection?.explained ? ` (${Math.round((projection.explained[0] + projection.explained[1]) * 100)}% of variance)` : ""}` : layout === "knn" ? " · neighbour embedding" : "";
+    view.lc_summary = `${notes.length.toLocaleString()} notes · ${clusters.length} clusters · ${links.length.toLocaleString()} links${layout_tag}`;
     lc_vault_graph_set_status(view, view.lc_summary, { stale: view.lc_stale });
   };
   // -- canvas / zoom -----------------------------------------------------------------
@@ -31337,6 +31730,10 @@ async function lc_vault_graph_mount(view, build_id) {
         context.font = `${10 / k}px ${theme.font}`;
         context.fillStyle = theme.muted;
         context.fillText(`${node.members.length} notes`, node.x, node.y + node.radius + 4 / k + 15 / k);
+        const centre = node.cluster.center_note;
+        if (is_hovered && centre && !node.label.includes(centre.label)) {
+          context.fillText(`nearest note: ${centre.label}`, node.x, node.y + node.radius + 4 / k + 28 / k);
+        }
       } else {
         const r = is_hovered ? node.radius * 1.6 : node.radius;
         context.globalAlpha = alpha;
@@ -31393,6 +31790,12 @@ async function lc_vault_graph_mount(view, build_id) {
         }
         simulation.alpha(0.6).restart();
       }
+    },
+    // cluster names changed (naming setting): relabel the hubs without a relayout
+    refresh_labels: () => {
+      for (const hub of hub_of.values()) hub.label = hub.cluster.name;
+      lc_vault_graph_render_legend(view, clusters, hub_of, fit_to);
+      request_draw();
     },
     set_query: (text) => {
       query = String(text || "").trim().toLowerCase();
@@ -31469,7 +31872,8 @@ function lc_vault_graph_render_legend(view, clusters, hub_of, fit_to) {
   for (const cluster of sorted) {
     const hub = hub_of.get(cluster.index);
     if (!hub) continue;
-    const row = legend.createEl("button", { cls: "lc-vault-graph-legend-row", attr: { type: "button", title: `Zoom to “${cluster.name}” (${cluster.members.length} notes)` } });
+    const nearest = cluster.center_note && !cluster.name.includes(cluster.center_note.label) ? ` · nearest note: ${cluster.center_note.label}` : "";
+    const row = legend.createEl("button", { cls: "lc-vault-graph-legend-row", attr: { type: "button", title: `Zoom to “${cluster.name}” (${cluster.members.length} notes)${nearest}` } });
     const dot = row.createSpan({ cls: "lc-vault-graph-legend-dot" });
     dot.style.background = hub.color;
     row.createSpan({ cls: "lc-vault-graph-legend-label", text: cluster.name });
@@ -31568,7 +31972,10 @@ async function lc_vault_graph_render_settings(tab, container) {
         return lc_vault_graph_settings(env);
       }
     };
-    render_settings_config(LC_VAULT_GRAPH_SETTINGS_CONFIG, scope, section, { default_group_name: "Vault graph" });
+    render_settings_config(LC_VAULT_GRAPH_SETTINGS_CONFIG, scope, section, {
+      default_group_name: "Vault graph",
+      group_params: { "Vault graph": { order: 0 }, "Vault visualisation": { order: 1 } }
+    });
   } catch (err) {
     console.error("[local-connections] vault graph settings render failed", err);
     section.createEl("p", { cls: "setting-item-description", text: "Could not render the vault graph settings: " + (err?.message || err) });
@@ -31577,7 +31984,7 @@ async function lc_vault_graph_render_settings(tab, container) {
 // The actions config literal (smart_env_config3) is evaluated before this
 // section runs, so `var` specs referenced from it are still undefined there.
 // Register from here instead, once the config object exists.
-smart_env_config3.actions.lc_vault_graph_open = { action: lc_vault_graph_open, commands: lc_vault_graph_commands, ribbon_icons: lc_vault_graph_ribbon_icons, menus: lc_vault_graph_menus, version: "1.9.0" };
+smart_env_config3.actions.lc_vault_graph_open = { action: lc_vault_graph_open, commands: lc_vault_graph_commands, ribbon_icons: lc_vault_graph_ribbon_icons, menus: lc_vault_graph_menus, version: "1.10.0" };
 smart_env_config3.actions.lc_search_focus.commands = lc_search_focus_commands;
 smart_env_config3.actions.lc_search_selection.commands = lc_search_selection_commands;
 
