@@ -72,6 +72,12 @@ and run `tools/check.sh` → `tools/install.sh` as usual.
 
 ### 3.1 Layout by projection instead of springs (biggest visible win)
 
+> **Done in v1.10.0** — `lc_vault_pca2` (power iteration) and `lc_vault_knn_embed`
+> (UMAP-style, seeded from the PCA), behind the `layout` setting (`force` keeps the
+> original). Cached on `view.lc_data.pca` / `.projection`; nodes are anchored to
+> `px/py` with `forceX/Y` and only collision runs. The notes below are the design
+> as written before the work.
+
 Today distance on screen is spring equilibrium, not semantic distance. Replace
 (or seed) the force layout with a 2-D projection of the vectors so that
 "near on screen" means "similar".
@@ -116,6 +122,10 @@ Also worth a setting: **strip the breadcrumbs** (see §2) for vaults whose
 folders are administrative rather than topical.
 
 ### 3.4 Cluster naming from keywords
+
+> **Done in v1.10.0** — `lc_vault_graph_keyword_names` / `lc_vault_graph_name_clusters`,
+> behind the `cluster_naming` setting (`centroid` keeps the original). The hub
+> shows the nearest note on hover; the legend tooltip carries it too.
 
 At higher cluster counts the nearest-centroid note name can mislead. Add a
 TF-IDF over member titles (and first heading) — top 2–3 terms as the hub

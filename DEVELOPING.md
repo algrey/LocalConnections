@@ -32,7 +32,9 @@ inside a handler needs a manual pass:
 - open the hamburger menu; switch Graph style (Classic ⇄ Force graph)
 - ⌘-click a result row and a graph node (both insert a link)
 - open the vault graph (orbit ribbon icon); hover a hub, click a hub, click a
-  note, change the cluster count and the neighbour count
+  note, change the cluster count and the neighbour count; switch Layout
+  (Springs ⇄ PCA ⇄ Neighbours) and Names (Nearest note ⇄ Keywords) in the
+  toolbar and in Settings → Vault graph → *Vault visualisation*
 
 ## Finding code
 
