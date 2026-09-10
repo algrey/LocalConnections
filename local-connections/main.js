@@ -1,4 +1,4 @@
-/*! local-connections v1.9.1 | private local-only fork of smart-connections-obsidian v4.7.2 (c) Brian Petro, MIT | phone-home code removed; embeddings are local-only upstream as of 4.7.x */
+/*! local-connections v1.9.2 | private local-only fork of smart-connections-obsidian v4.7.2 (c) Brian Petro, MIT | phone-home code removed; embeddings are local-only upstream as of 4.7.x */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -30825,7 +30825,7 @@ function lc_vault_graph_build_ui(view, container) {
     <canvas class="lc-vault-graph-canvas"></canvas>
     <div class="lc-vault-graph-legend"></div>
     <div class="lc-vault-graph-empty" hidden></div>
-    <div class="lc-vault-graph-hint">Click a note to open it · ⌘-click inserts a link at the cursor · ⌘-hover previews · click a hub to zoom to its cluster · double-click the background to fit · drag to move · scroll to zoom</div>
+    <div class="lc-vault-graph-hint">Click a note to open it in a new tab · ⌘-click copies a link to it · ⌘-hover previews · click a hub to zoom to its cluster · double-click the background to fit · drag to move · scroll to zoom</div>
   </div>`;
   container.appendChild(root);
   const ui = {
@@ -31477,36 +31477,32 @@ function lc_vault_graph_render_legend(view, clusters, hub_of, fit_to) {
     row.addEventListener("click", () => fit_to(hub.members.concat([hub]), true, 3));
   }
 }
-// Plain click opens the note in a markdown leaf (never in the graph's own tab);
-// shift-click opens a new tab; ⌘/Ctrl-click inserts a link at the cursor of the
-// active editor, matching the connections list and the other graphs.
+// Click opens the note in a new tab and switches to it; ⌘/Ctrl-click copies a
+// link to the note (in the vault's configured link format) to the clipboard.
 async function lc_vault_graph_open_note(view, node, event) {
+  const { Notice } = require("obsidian");
   const app2 = view.app;
   const key = node?.id;
   if (!key) return;
-  if (event && (event.metaKey || event.ctrlKey)) {
-    const active = app2.workspace.activeEditor?.file?.path || app2.workspace.getActiveFile()?.path || "";
-    try {
-      lc_insert_link_to_node({ lc_env: view.env, currentNoteKey: active }, { id: key });
-    } catch (err) {
-      console.error("[local-connections] vault graph insert link failed", err);
-    }
-    return;
-  }
   const file = app2.metadataCache.getFirstLinkpathDest(key, "") || app2.vault.getAbstractFileByPath(key);
   if (!file) {
-    const { Notice } = require("obsidian");
     new Notice(`Local Connections: cannot resolve ${key}`);
     return;
   }
-  let leaf = null;
-  if (!event?.shiftKey) {
-    const markdown_leaves = app2.workspace.getLeavesOfType("markdown");
-    const active_path = app2.workspace.getActiveFile()?.path;
-    leaf = markdown_leaves.find((l) => l.view?.file?.path === active_path) || markdown_leaves.find((l) => l.getRoot?.() === app2.workspace.rootSplit) || markdown_leaves[0] || null;
+  if (event && (event.metaKey || event.ctrlKey)) {
+    const link = app2.fileManager.generateMarkdownLink(file, "");
+    try {
+      await navigator.clipboard.writeText(link);
+      new Notice(`Copied link to ${file.basename}`);
+    } catch (err) {
+      console.error("[local-connections] vault graph copy link failed", err);
+      new Notice("Local Connections: could not copy the link to the clipboard.");
+    }
+    return;
   }
-  if (!leaf) leaf = app2.workspace.getLeaf("tab");
-  await leaf.openFile(file);
+  const leaf = app2.workspace.getLeaf("tab");
+  await leaf.openFile(file, { active: true });
+  app2.workspace.setActiveLeaf(leaf, { focus: true });
 }
 // --- Registration: action (command + ribbon + hamburger menu) and settings section ---
 async function lc_vault_graph_open(params = {}) {
