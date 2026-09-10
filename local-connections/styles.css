@@ -1394,6 +1394,12 @@ svg .smart-connections-visualizer-nodes circle {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* display:flex on the class would beat the UA's [hidden] { display:none } and
+   leave an invisible full-size layer over the canvas that swallows every
+   click, wheel and drag — keep the hidden rule explicit */
+.lc-vault-graph-empty[hidden] {
+  display: none;
+}
 .lc-vault-graph-empty {
   position: absolute;
   inset: 0;
