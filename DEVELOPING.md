@@ -15,22 +15,25 @@
 
 This repo is the plugin's *source code* only. Nothing from an actual
 Obsidian vault belongs in it — no notes, no `data.json`, no embeddings/vector
-caches, no `.smart-env` folder, no API keys. It's easy to do by accident when
-testing against a real vault (e.g. copying a settings file in for a repro, or
+caches, no `.smart-env` folder. It's easy to do by accident when testing
+against a real vault (e.g. copying a settings file in for a repro, or
 symlinking a vault folder into the repo for the harness). Before committing,
 especially after a debugging session against a real vault:
 
 - `git status` — check for unexpected new files, not just the ones you meant
   to touch.
-- Grep for secrets/PII before staging anything unfamiliar: API keys
-  (`sk-…`, `api_key`), emails, `data.json`, `*.smart-env*`.
+- Watch for `data.json`, `*.smart-env*`, or any embeddings/vector cache
+  showing up unstaged or staged.
 - If something did get committed, it's not enough to delete it in a new
   commit — the old blob is still in history. Rewrite history
-  (`git filter-repo` or BFG) and rotate any exposed credential immediately.
+  (`git filter-repo` or BFG) to remove it.
 
 (This note exists because a leaked OpenAI API key was found in a Smart
 Connections `data.json` in this user's vault — outside this repo, but a
-reminder of what "vault data" can contain.)
+reminder of what "vault data" can contain. Secrets specifically are unlikely
+here since this is local-first and most credentials never leave the vault,
+plus GitHub's own push protection flags obvious ones — but vault content like
+embeddings has no such safety net.)
 
 ## The loop
 
