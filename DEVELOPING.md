@@ -11,7 +11,7 @@
 | `tools/*_test.js` | The jsc tests themselves |
 | `tools/harness/` | Browser harness for the vault graph (real bundle + real d3, fake env); see *Testing the vault graph* |
 
-## Never commit vault data
+## Never commit vault data, including embeddings
 
 This repo is the plugin's *source code* only. Nothing from an actual
 Obsidian vault belongs in it — no notes, no `data.json`, no embeddings/vector
