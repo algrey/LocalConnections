@@ -1,4 +1,4 @@
-/*! local-connections v1.10.0 | private local-only fork of smart-connections-obsidian v4.7.2 (c) Brian Petro, MIT | phone-home code removed; embeddings are local-only upstream as of 4.7.x */
+/*! local-connections v1.10.1 | private local-only fork of smart-connections-obsidian v4.7.2 (c) Brian Petro, MIT | phone-home code removed; embeddings are local-only upstream as of 4.7.x */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -30379,14 +30379,12 @@ var LC_VAULT_GRAPH_SETTINGS_CONFIG = {
   layout: {
     name: "Layout",
     type: "dropdown",
-    group: "Vault visualisation",
     description: "Where the notes are placed. Springs (physics): the original force layout \u2014 distance on screen is spring equilibrium, not similarity. PCA projection: the two principal directions of the embedding vectors, so distance on screen is semantic distance (deterministic and cheap, but flattens a lot). Neighbour embedding: a UMAP-style layout driven by the neighbour links and the clusters, seeded from the PCA \u2014 better separated, and better with more neighbours per note. In both projected layouts the physics only untangles overlapping dots.",
     options_callback: () => Object.entries(LC_VAULT_GRAPH_LAYOUTS).map(([value, name]) => ({ value, name }))
   },
   cluster_naming: {
     name: "Cluster names",
     type: "dropdown",
-    group: "Vault visualisation",
     description: "Nearest note: each hub is named after the note nearest its centroid (the original). Keywords from titles: the two or three terms most specific to the cluster\u2019s note titles (TF-IDF across clusters), which stays meaningful at high cluster counts; the nearest note is still shown when hovering the hub and in the legend tooltip.",
     options_callback: () => Object.entries(LC_VAULT_GRAPH_NAMINGS).map(([value, name]) => ({ value, name }))
   }
@@ -31960,7 +31958,7 @@ async function lc_vault_graph_render_settings(tab, container) {
     cls: "sc-settings-tab__section lc-vault-graph-settings",
     attr: { "data-section-key": "lc_vault_graph" }
   });
-  section.createEl("h1", { text: "Vault graph" });
+  section.createEl("h1", { text: "Vault Visualisation Graph" });
   section.createEl("p", {
     cls: "setting-item-description",
     text: "A map of the whole vault: every embedded note, grouped into clusters by meaning, with links to each note’s nearest neighbours and to the notes it links to. Open it from the orbit ribbon icon, the command “Open: Vault graph” or the Connections view menu. The toolbar in the graph changes the same settings."
@@ -31972,10 +31970,7 @@ async function lc_vault_graph_render_settings(tab, container) {
         return lc_vault_graph_settings(env);
       }
     };
-    render_settings_config(LC_VAULT_GRAPH_SETTINGS_CONFIG, scope, section, {
-      default_group_name: "Vault graph",
-      group_params: { "Vault graph": { order: 0 }, "Vault visualisation": { order: 1 } }
-    });
+    render_settings_config(LC_VAULT_GRAPH_SETTINGS_CONFIG, scope, section, { default_group_name: "Vault Visualisation Graph" });
   } catch (err) {
     console.error("[local-connections] vault graph settings render failed", err);
     section.createEl("p", { cls: "setting-item-description", text: "Could not render the vault graph settings: " + (err?.message || err) });
@@ -31984,7 +31979,7 @@ async function lc_vault_graph_render_settings(tab, container) {
 // The actions config literal (smart_env_config3) is evaluated before this
 // section runs, so `var` specs referenced from it are still undefined there.
 // Register from here instead, once the config object exists.
-smart_env_config3.actions.lc_vault_graph_open = { action: lc_vault_graph_open, commands: lc_vault_graph_commands, ribbon_icons: lc_vault_graph_ribbon_icons, menus: lc_vault_graph_menus, version: "1.10.0" };
+smart_env_config3.actions.lc_vault_graph_open = { action: lc_vault_graph_open, commands: lc_vault_graph_commands, ribbon_icons: lc_vault_graph_ribbon_icons, menus: lc_vault_graph_menus, version: "1.10.1" };
 smart_env_config3.actions.lc_search_focus.commands = lc_search_focus_commands;
 smart_env_config3.actions.lc_search_selection.commands = lc_search_selection_commands;
 

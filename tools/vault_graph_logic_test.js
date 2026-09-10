@@ -95,7 +95,7 @@ var failure = null;
   assert(lc_vault_graph_layout({ layout: "pca" }) === "pca" && lc_vault_graph_layout({ layout: "knn" }) === "knn", "layout values");
   assert(lc_vault_graph_naming({}) === "centroid" && lc_vault_graph_naming({ cluster_naming: "x" }) === "centroid", "naming default/clamp");
   assert(lc_vault_graph_naming({ cluster_naming: "keywords" }) === "keywords", "naming value");
-  assert(LC_VAULT_GRAPH_SETTINGS_CONFIG.layout.group === "Vault visualisation" && LC_VAULT_GRAPH_SETTINGS_CONFIG.cluster_naming.group === "Vault visualisation", "new settings sit in the Vault visualisation group");
+  assert(!LC_VAULT_GRAPH_SETTINGS_CONFIG.layout.group && !LC_VAULT_GRAPH_SETTINGS_CONFIG.cluster_naming.group, "all vault graph settings share the one Vault Visualisation Graph block");
   var layout_options = LC_VAULT_GRAPH_SETTINGS_CONFIG.layout.options_callback({});
   assert(layout_options.length === 3 && layout_options[0].value === "force", "layout dropdown options");
   assert(LC_VAULT_GRAPH_SETTINGS_CONFIG.cluster_naming.options_callback({}).length === 2, "naming dropdown options");
