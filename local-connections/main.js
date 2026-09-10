@@ -1,4 +1,4 @@
-/*! local-connections v1.10.2 | private local-only fork of smart-connections-obsidian v4.7.2 (c) Brian Petro, MIT | phone-home code removed; embeddings are local-only upstream as of 4.7.x */
+/*! local-connections v1.10.3 | private local-only fork of smart-connections-obsidian v4.7.2 (c) Brian Petro, MIT | phone-home code removed; embeddings are local-only upstream as of 4.7.x */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -393,6 +393,7 @@ function is_observable(value) {
 function deep_merge(target = {}, source = {}) {
   for (const key in source) {
     if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+    if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
     if (is_plain_object(source[key]) && is_plain_object(target[key])) {
       deep_merge(target[key], source[key]);
     } else {
@@ -19893,8 +19894,8 @@ async function build_html28(connections_list, params = {}) {
   const height = params.height ?? 100;
   return `
     <div class="connections-graph sc-graph"
-         data-center-key="${to_item?.key || ""}"
-         data-center-collection="${to_item?.collection_key || ""}">
+         data-center-key="${escape_html(to_item?.key || "")}"
+         data-center-collection="${escape_html(to_item?.collection_key || "")}">
       <svg class="sc-graph-svg"
            width="${width}" height="${height}"
            viewBox="0 0 ${width} ${height}"
@@ -20250,21 +20251,21 @@ async function build_html29(result, params = {}) {
   return `<div class="temp-container">
     <div
       class="sc-result ${all_expanded ? "" : "sc-collapsed"}"
-      data-path="${item.path.replace(/"/g, "&quot;")}"
-      data-link="${item.link?.replace(/"/g, "&quot;") || ""}"
-      data-collection="${item.collection_key}"
-      data-score="${score}"
-      data-key="${item.key}"
+      data-path="${escape_html(item.path)}"
+      data-link="${escape_html(item.link || "")}"
+      data-collection="${escape_html(item.collection_key)}"
+      data-score="${escape_html(score)}"
+      data-key="${escape_html(item.key)}"
       draggable="true"
     >
       <span class="header">
         ${this.get_icon_html("right-triangle")}
-        <a class="sc-result-file-title" href="#" title="${item.path.replace(/"/g, "&quot;")}" draggable="true">
+        <a class="sc-result-file-title" href="#" title="${escape_html(item.path)}" draggable="true">
           ${header_html}
         </a>
       </span>
       <ul draggable="true">
-        <li class="sc-result-file-title" title="${item.path.replace(/"/g, "&quot;")}" data-collection="${item.collection_key}" data-key="${item.key}"></li>
+        <li class="sc-result-file-title" title="${escape_html(item.path)}" data-collection="${escape_html(item.collection_key)}" data-key="${escape_html(item.key)}"></li>
       </ul>
     </div>
   </div>`;
@@ -20309,7 +20310,11 @@ ${await entity.read()}`;
       else markdown = process_for_rendering(await entity.read());
       let entity_frag;
       if (should_render_markdown) entity_frag = await this.render_markdown(markdown, entity);
-      else entity_frag = this.create_doc_fragment(markdown);
+      else {
+        // plain text: never parse note content as HTML
+        entity_frag = activeDocument.createElement("pre");
+        entity_frag.textContent = markdown;
+      }
       container.querySelector("li").appendChild(entity_frag);
     }
   };
@@ -20375,11 +20380,11 @@ function get_result_header_html(score, item, component_settings = {}) {
   const name = parts.pop();
   const formatted_score = typeof score === "number" ? score.toFixed(2) : score;
   const separator = '<small class="sc-breadcrumb-separator"> &gt; </small>';
-  const parts_html = parts.map((part) => `<small class="sc-breadcrumb">${part}</small>`).join(separator);
+  const parts_html = parts.map((part) => `<small class="sc-breadcrumb">${escape_html(part)}</small>`).join(separator);
   return [
-    `<small class="sc-breadcrumb sc-score">${formatted_score}</small>`,
+    `<small class="sc-breadcrumb sc-score">${escape_html(formatted_score)}</small>`,
     `${parts_html}${separator}`,
-    `<small class="sc-breadcrumb sc-title">${name.endsWith(".md") ? name.replace(/\.md$/, "") : name}</small>`
+    `<small class="sc-breadcrumb sc-title">${escape_html(name.endsWith(".md") ? name.replace(/\.md$/, "") : name)}</small>`
   ].join("");
 }
 function format_item_parts(parts, lines = []) {
@@ -20429,7 +20434,7 @@ var settings_config11 = {
 
 // src/components/connections-list/v3.js
 async function build_html30(connections_list, opts = {}) {
-  return `<div><div class="connections-list sc-list" data-key="${connections_list.item.key}"></div></div>`;
+  return `<div><div class="connections-list sc-list" data-key="${escape_html(connections_list.item.key)}"></div></div>`;
 }
 async function render32(connections_list, opts = {}) {
   const html = await build_html30.call(this, connections_list, opts);
@@ -20459,7 +20464,7 @@ var display_name10 = "List only";
 async function build_html31(connections_list, opts = {}) {
   return `<div>
       <div class="connections-graph-container"></div>
-      <div class="connections-list sc-list" data-key="${connections_list.item.key}"></div>
+      <div class="connections-list sc-list" data-key="${escape_html(connections_list.item.key)}"></div>
   </div>`;
 }
 async function render33(connections_list, opts = {}) {
@@ -20480,7 +20485,7 @@ async function post_process30(connections_list, container, opts = {}) {
     await lc_search_render_graph(graph_container, opts.lc_view);
   } catch (_err) {
     this.empty(graph_container);
-    const error_message = this.create_doc_fragment(`<p class="sc-graph-error">Unable to load graph visualization: ${typeof _err?.message === "string" ? _err.message : "Unknown error"}</p>`);
+    const error_message = this.create_doc_fragment(`<p class="sc-graph-error">Unable to load graph visualization: ${escape_html(typeof _err?.message === "string" ? _err.message : "Unknown error")}</p>`);
     graph_container.appendChild(error_message);
   }
   if (!results || !Array.isArray(results) || results.length === 0) {
@@ -28816,16 +28821,29 @@ function lc_collect_note_links(env, entries = []) {
       outlink_keys.set(source.key, new Set(keys));
     }
   }
+  // Drive the pass by each note's outlinks (O(sum of outlinks)) rather than
+  // by all pairs (O(n^2)): the vault graph calls this with every embedded note.
+  const by_source_key = new Map();
+  for (const entry of resolved) {
+    let list = by_source_key.get(entry.source_key);
+    if (!list) by_source_key.set(entry.source_key, list = []);
+    list.push(entry);
+  }
   const links = [];
   const seen = new Set();
   for (const a of resolved) {
-    for (const b of resolved) {
-      if (a === b || a.source_key === b.source_key) continue;
-      if (!outlink_keys.get(a.source_key)?.has(b.source_key)) continue;
-      const pair_key = [String(a.id), String(b.id)].sort().join("\u0000");
-      if (seen.has(pair_key)) continue;
-      seen.add(pair_key);
-      links.push({ source: a.id, target: b.id });
+    const keys = outlink_keys.get(a.source_key);
+    if (!keys?.size) continue;
+    for (const key of keys) {
+      if (key === a.source_key) continue;
+      const targets = by_source_key.get(key);
+      if (!targets) continue;
+      for (const b of targets) {
+        const pair_key = [String(a.id), String(b.id)].sort().join("\u0000");
+        if (seen.has(pair_key)) continue;
+        seen.add(pair_key);
+        links.push({ source: a.id, target: b.id });
+      }
     }
   }
   return links;
@@ -28954,7 +28972,17 @@ async function lc_render_visualizer_graph(connections_list, params = {}) {
     saveSettings: async () => {}
     // persistence handled by the env settings proxy (debounced auto-save)
   };
+  // Stop the previous render's d3 simulation: it would otherwise keep ticking
+  // on a detached container until its alpha decays (search-as-you-type re-renders often).
+  const prev_view = connections_list._lc_visualizer_view;
+  if (prev_view?.simulation && typeof prev_view.simulation.stop === "function") {
+    try {
+      prev_view.simulation.stop();
+    } catch (_err) {
+    }
+  }
   const view = new LC_VISUALIZER.ScGraphItemView(null, shim_plugin);
+  connections_list._lc_visualizer_view = view;
   view.app = app2;
   view.contentEl = container;
   view.currentNoteKey = to_item?.source_key || to_item?.key || "";
@@ -29007,6 +29035,7 @@ async function lc_render_visualizer_graph(connections_list, params = {}) {
 // ===== Local Connections settings UI / local models =====
 var LC_LOCAL_MODEL_PREFIX = "lc-local/";
 var LC_LOCAL_MODELS_DIR = "models";
+var LC_MAX_IMPORT_BYTES = 2 * 1024 * 1024 * 1024;
 var LC_ONNX_PREFERENCE = [
   "model_quantized.onnx",
   "model_q8.onnx",
@@ -29084,12 +29113,15 @@ function lc_resolve_onnx_fallback(entry, file_rel) {
   return chosen ? `onnx/${chosen}${ext}` : null;
 }
 async function lc_read_local_model_file(env, rel_path) {
-  if (typeof rel_path !== "string" || !rel_path || rel_path.split("/").includes("..")) return null;
+  // requested by the Transformers.js runtime inside the worker: allowlist every segment
+  if (typeof rel_path !== "string" || !rel_path) return null;
   const segments = rel_path.split("/").filter(Boolean);
-  if (segments.length < 2) return null;
+  if (segments.length < 2 || segments.some((seg) => seg === ".." || !/^[A-Za-z0-9._-]+$/.test(seg))) return null;
   const [name, ...rest] = segments;
-  const entry = lc_get_local_models_registry(env)[name];
-  if (!entry) return null;
+  const registry = lc_get_local_models_registry(env);
+  if (!lc_valid_model_name(name) || !Object.prototype.hasOwnProperty.call(registry, name)) return null;
+  const entry = registry[name];
+  if (!entry || typeof entry !== "object") return null;
   const adapter = lc_vault_adapter(env);
   if (!adapter) return null;
   const model_dir = `${lc_local_models_base_dir(env)}/${name}`;
@@ -29122,9 +29154,15 @@ async function lc_handle_worker_file_request(adapter, data) {
 }
 
 // --- importing a model folder -------------------------------------------------
+var LC_RESERVED_MODEL_NAMES = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
 function lc_sanitize_model_name(name) {
   const cleaned = String(name || "").trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "").slice(0, 80);
-  return cleaned || "model";
+  return !cleaned || LC_RESERVED_MODEL_NAMES.has(cleaned) ? "model" : cleaned;
+}
+// A registry key is only trusted as a folder name if it round-trips the sanitiser:
+// the registry lives in data.json, and a key like "../.." would otherwise reach rmdir/readBinary.
+function lc_valid_model_name(name) {
+  return typeof name === "string" && name.length > 0 && name === lc_sanitize_model_name(name);
 }
 function lc_should_copy_model_file(rel) {
   if (/^[^/]+\.json$/.test(rel)) return true;
@@ -29221,12 +29259,18 @@ async function lc_import_model_files(env, file_list, report = null) {
       continue;
     }
     const dest = `${lc_local_models_base_dir(env)}/${name}`;
+    // plan first: a cloned HF repo can carry every onnx/ precision variant (gigabytes)
+    const to_copy = model_files.filter((f) => lc_should_copy_model_file(rel_of(f)));
+    const planned = to_copy.reduce((sum, f) => sum + (Number(f.size) || 0), 0);
+    if (planned > LC_MAX_IMPORT_BYTES) {
+      results.push({ root, error: `${lc_format_bytes(planned)} to copy exceeds the ${lc_format_bytes(LC_MAX_IMPORT_BYTES)} limit; keep only the onnx/ precision you need` });
+      continue;
+    }
     await lc_ensure_dir(adapter, dest);
     let copied = 0;
     let bytes = 0;
-    for (const f of model_files) {
+    for (const f of to_copy) {
       const rel = rel_of(f);
-      if (!lc_should_copy_model_file(rel)) continue;
       const dest_path = `${dest}/${rel}`;
       await lc_ensure_dir(adapter, dest_path.split("/").slice(0, -1).join("/"));
       if (typeof report === "function") report(`Copying ${name}/${rel} (${lc_format_bytes(f.size)})\u2026`);
@@ -29274,6 +29318,7 @@ async function lc_use_local_model(env, name) {
   target.debounce_save();
 }
 async function lc_remove_local_model(env, name) {
+  if (!lc_valid_model_name(name)) throw new Error(`Invalid model name: ${name}`);
   const key = LC_LOCAL_MODEL_PREFIX + name;
   if (lc_models_using(env, key).length) throw new Error("This model is selected by an embedding model configuration. Switch models first.");
   const adapter = lc_vault_adapter(env);
@@ -29403,7 +29448,7 @@ async function lc_render_local_models(env, parent) {
     section.empty();
     lc_sync_local_transformers_models(env);
     const registry = lc_get_local_models_registry(env);
-    const names = Object.keys(registry).filter((n) => registry[n] && typeof registry[n] === "object").sort((a, b) => a.localeCompare(b));
+    const names = Object.keys(registry).filter((n) => lc_valid_model_name(n) && registry[n] && typeof registry[n] === "object").sort((a, b) => a.localeCompare(b));
 
     const heading = new Setting(section).setName("Local embedding model files").setHeading();
     heading.setDesc("Use an embedding model from files on this computer. Runs fully offline.");
@@ -30203,8 +30248,8 @@ function lc_blocks_count_short_notes(env, min_chars) {
 function lc_blocks_render_min_length_setting(env, section, Setting, Notice) {
   const setting = new Setting(section).setName("Minimum note length").setDesc("Notes with fewer characters than this are not embedded, so they get no connections and cannot centre the graph. Changing it re-imports every note; newly eligible notes are embedded right away. 0 embeds everything.");
   const counter = section.createDiv({ cls: "setting-item-description lc-min-length-count" });
-  const update_counter = () => {
-    const min = lc_blocks_min_length(env);
+  const update_counter = (pending) => {
+    const min = pending ?? lc_blocks_min_length(env);
     const { total, short } = lc_blocks_count_short_notes(env, min);
     counter.textContent = total ? `${short} of ${total} notes are at or below ${min} characters and have no embedding.` : "";
   };
@@ -30218,13 +30263,15 @@ function lc_blocks_render_min_length_setting(env, section, Setting, Notice) {
     text.onChange((value) => {
       const next = Math.floor(Number(value));
       if (!Number.isFinite(next) || next < 0) return;
-      if (next === lc_blocks_min_length(env)) return;
-      if (!env.settings.smart_sources) env.settings.smart_sources = {};
-      env.settings.smart_sources.min_chars = next;
-      update_counter();
+      update_counter(next);
       if (apply_timeout) window.clearTimeout(apply_timeout);
       apply_timeout = window.setTimeout(() => {
         apply_timeout = null;
+        if (next === lc_blocks_min_length(env)) return;
+        // persist and re-import only once typing has paused (each keystroke fires onChange)
+        if (!env.settings.smart_sources) env.settings.smart_sources = {};
+        env.settings.smart_sources.min_chars = next;
+        update_counter();
         const count = lc_blocks_reimport_all(env);
         if (Notice) new Notice(`Local Connections: minimum note length is ${next} — re-importing ${count} notes.`);
       }, 1200);
@@ -30543,6 +30590,9 @@ async function lc_vault_kmeans(vecs = [], k = 2, opts = {}) {
   }
   const assign = new Int32Array(n).fill(-1);
   const sims = new Float32Array(n);
+  // accumulators reused across iterations (lc_vault_unit_vec copies, so no aliasing)
+  const acc = centers.map(() => new Float64Array(d));
+  const counts = new Int32Array(centers.length);
   let it = 0;
   for (; it < max_iter; it++) {
     let changed = 0;
@@ -30564,8 +30614,8 @@ async function lc_vault_kmeans(vecs = [], k = 2, opts = {}) {
       sims[i] = Math.max(0, Math.min(1, best_s));
       if ((i & 63) === 0) await tick(Math.min(0.95, 0.05 + 0.9 * (it + i / n) / 12));
     }
-    const acc = centers.map(() => new Float64Array(d));
-    const counts = new Int32Array(centers.length);
+    for (const a of acc) a.fill(0);
+    counts.fill(0);
     for (let i = 0; i < n; i++) {
       const a = acc[assign[i]];
       const v = vecs[i];
@@ -30924,15 +30974,6 @@ function lc_vault_graph_keyword_names(clusters = [], max_terms = 3) {
 // --- The view ----------------------------------------------------------------------
 var LC_VAULT_GRAPH_VIEW_TYPE = "lc-vault-graph";
 var LC_VAULT_GRAPH_PALETTE = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#b07aa1", "#76b7b2", "#edc948", "#ff9da7", "#9c755f", "#bab0ac"];
-function lc_vault_graph_hex_to_rgba(hex, alpha = 1) {
-  if (!/^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$/.test(hex)) return `rgba(128,128,128,${alpha})`;
-  let h = hex.slice(1);
-  if (h.length === 3) h = h.split("").map((ch) => ch + ch).join("");
-  const r = parseInt(h.substr(0, 2), 16);
-  const g = parseInt(h.substr(2, 2), 16);
-  const b = parseInt(h.substr(4, 2), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
 // Theme colours for the canvas, read from the Obsidian CSS variables of the
 // container (canvas cannot use var()). Any colour format works for fills; the
 // alpha fades use globalAlpha so the format does not matter.
@@ -31358,6 +31399,7 @@ async function lc_vault_graph_mount(view, build_id) {
   ui.empty.hidden = true;
   const canvas_el = ui.canvas;
   const container_el = ui.content;
+  const win = container_el.ownerDocument?.defaultView || window;
   const context = canvas_el.getContext("2d");
   const theme = lc_vault_graph_theme(container_el);
   theme.font = lc_vault_graph_font(theme);
@@ -31415,6 +31457,7 @@ async function lc_vault_graph_mount(view, build_id) {
       note,
       item: note.item,
       label: note.label,
+      search: `${note.label}\n${note.id}`.toLowerCase(),
       hub,
       color: hub ? hub.color : theme.muted,
       radius: 4,
@@ -31503,7 +31546,7 @@ async function lc_vault_graph_mount(view, build_id) {
   let frame = null;
   const request_draw = () => {
     if (frame || destroyed) return;
-    frame = window.requestAnimationFrame(() => {
+    frame = win.requestAnimationFrame(() => {
       frame = null;
       draw();
     });
@@ -31512,7 +31555,7 @@ async function lc_vault_graph_mount(view, build_id) {
     const rect = container_el.getBoundingClientRect();
     width = Math.max(1, Math.floor(rect.width));
     height = Math.max(1, Math.floor(rect.height));
-    dpr = window.devicePixelRatio || 1;
+    dpr = win.devicePixelRatio || 1;
     canvas_el.width = Math.floor(width * dpr);
     canvas_el.height = Math.floor(height * dpr);
     canvas_el.style.width = width + "px";
@@ -31694,10 +31737,21 @@ async function lc_vault_graph_mount(view, build_id) {
     const fade_links = hl.links ? 0.06 : 1;
     const fade_nodes = hl.nodes ? 0.12 : 1;
     context.lineCap = "round";
+    let wiki_batch = false;
     for (const l of links) {
       const s = l.source, t = l.target;
       if (!visible(s) && !visible(t)) continue;
       const on = !hl.links || hl.links.has(l);
+      if (l.kind === "wikilink" && !hl.links) {
+        // constant style: accumulate into one path, stroked once after the loop
+        if (!wiki_batch) {
+          context.beginPath();
+          wiki_batch = true;
+        }
+        context.moveTo(s.x, s.y);
+        context.lineTo(t.x, t.y);
+        continue;
+      }
       if (l.kind === "spoke") {
         context.strokeStyle = l.color;
         context.globalAlpha = (on ? 0.22 : fade_links * 0.22) * Math.min(1, 0.4 + l.score);
@@ -31716,8 +31770,19 @@ async function lc_vault_graph_mount(view, build_id) {
       context.lineTo(t.x, t.y);
       context.stroke();
     }
+    if (wiki_batch) {
+      context.strokeStyle = theme.link;
+      context.globalAlpha = 0.75;
+      context.lineWidth = 1.1 / k;
+      context.stroke();
+    }
     const show_member_labels = k >= 1.5;
     const label_px = 11 / k;
+    // font strings built once per frame: assigning context.font re-parses the shorthand
+    const member_font = `${label_px}px ${theme.font}`;
+    const hovered_font = `${12 / k}px ${theme.font}`;
+    const hub_font = `600 ${13 / k}px ${theme.font}`;
+    const hub_sub_font = `${10 / k}px ${theme.font}`;
     context.textBaseline = "top";
     context.textAlign = "center";
     for (const node of nodes) {
@@ -31739,9 +31804,9 @@ async function lc_vault_graph_mount(view, build_id) {
         }
         context.globalAlpha = alpha;
         context.fillStyle = theme.text;
-        context.font = `600 ${13 / k}px ${theme.font}`;
+        context.font = hub_font;
         context.fillText(node.label, node.x, node.y + node.radius + 4 / k);
-        context.font = `${10 / k}px ${theme.font}`;
+        context.font = hub_sub_font;
         context.fillStyle = theme.muted;
         context.fillText(`${node.members.length} notes`, node.x, node.y + node.radius + 4 / k + 15 / k);
         const centre = node.cluster.center_note;
@@ -31763,7 +31828,7 @@ async function lc_vault_graph_mount(view, build_id) {
         // label highlighted members only when the set is small enough to read
         if (show_member_labels || is_hovered || on && hl.nodes && hl.nodes.size <= 40) {
           context.fillStyle = theme.text;
-          context.font = `${is_hovered ? 12 / k : label_px}px ${theme.font}`;
+          context.font = is_hovered ? hovered_font : member_font;
           context.fillText(node.label, node.x, node.y + r + 3 / k);
         }
       }
@@ -31783,9 +31848,9 @@ async function lc_vault_graph_mount(view, build_id) {
     fit: (animate) => fit_to(nodes, animate),
     apply_links: () => {
       select_links();
-      if (!pinned) simulation.alpha(0.5).restart();
+      // the link force is only attached in the springs layout; the legend does not depend on links
+      if (!pinned && !projection) simulation.alpha(0.5).restart();
       request_draw();
-      lc_vault_graph_render_legend(view, clusters, hub_of, fit_to);
     },
     set_pinned: (value) => {
       pinned = Boolean(value);
@@ -31818,7 +31883,7 @@ async function lc_vault_graph_mount(view, build_id) {
       } else {
         query_set = /* @__PURE__ */ new Set();
         for (const n of nodes) {
-          if (n.type === "member" && (n.label.toLowerCase().includes(query) || n.id.toLowerCase().includes(query))) query_set.add(n);
+          if (n.type === "member" && n.search.includes(query)) query_set.add(n);
         }
       }
       request_draw();
@@ -31827,7 +31892,7 @@ async function lc_vault_graph_mount(view, build_id) {
       destroyed = true;
       simulation.stop();
       simulation.on("tick", null);
-      if (frame) window.cancelAnimationFrame(frame);
+      if (frame) win.cancelAnimationFrame(frame);
       observer?.disconnect();
       d3.select(canvas_el).on(".zoom", null).on(".drag", null).on("mousemove", null).on("mouseleave", null).on("click", null).on("dblclick", null);
       context.setTransform(1, 0, 0, 1, 0, 0);
@@ -31841,7 +31906,7 @@ async function lc_vault_graph_mount(view, build_id) {
   lc_vault_graph_render_legend(view, clusters, hub_of, fit_to);
   // Wait for layout (a tab opened in the background has no size yet).
   for (let i = 0; i < 180 && container_el.isConnected && container_el.clientWidth === 0; i++) {
-    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    await new Promise((resolve) => win.requestAnimationFrame(resolve));
     if (view.is_cancelled(build_id) || destroyed) return;
   }
   resize();
@@ -31874,9 +31939,9 @@ async function lc_vault_graph_mount(view, build_id) {
       return;
     }
     fit_to(nodes);
-    window.setTimeout(auto_fit, 400);
+    win.setTimeout(auto_fit, 400);
   };
-  window.setTimeout(auto_fit, 400);
+  win.setTimeout(auto_fit, 400);
 }
 function lc_vault_graph_render_legend(view, clusters, hub_of, fit_to) {
   const legend = view.lc_ui?.legend;
