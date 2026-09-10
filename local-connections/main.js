@@ -1,4 +1,4 @@
-/*! local-connections v1.9.0 | private local-only fork of smart-connections-obsidian v4.7.2 (c) Brian Petro, MIT | phone-home code removed; embeddings are local-only upstream as of 4.7.x */
+/*! local-connections v1.9.1 | private local-only fork of smart-connections-obsidian v4.7.2 (c) Brian Petro, MIT | phone-home code removed; embeddings are local-only upstream as of 4.7.x */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -31122,6 +31122,8 @@ async function lc_vault_graph_mount(view, build_id) {
     }
     return { min_x, max_x, min_y, max_y };
   };
+  // true once the user has zoomed, panned or dragged, or asked for a fit:
+  // ends the auto-fit that runs while the layout settles
   let settled = false;
   const fit_to = (subset, animate = false, max_scale = 4) => {
     if (!subset.length || !width || !height) return;
@@ -31160,6 +31162,10 @@ async function lc_vault_graph_mount(view, build_id) {
     }
     return !event.ctrlKey || event.type === "wheel";
   }).on("zoom", (event) => {
+    // sourceEvent is null for programmatic fits; a wheel or pan gesture has one.
+    // (d3-zoom stops immediate propagation on wheel/mousedown, so a separate
+    // listener on the canvas would never see these gestures.)
+    if (event.sourceEvent) settled = true;
     transform = event.transform;
     request_draw();
   });
@@ -31172,6 +31178,7 @@ async function lc_vault_graph_mount(view, build_id) {
   }).on("start", (event) => {
     const node = event.subject;
     if (!node) return;
+    settled = true;
     dragging = node;
     hovered = null;
     if (!event.active && !pinned) simulation.alphaTarget(0.15).restart();
@@ -31441,10 +31448,7 @@ async function lc_vault_graph_mount(view, build_id) {
   fit_to(nodes);
   if (pinned) graph.set_pinned(true);
   else simulation.restart();
-  // keep fitting until the layout has mostly settled, unless the user has zoomed
-  d3.select(canvas_el).on("wheel.lcfit mousedown.lcfit", () => {
-    settled = true;
-  });
+  // keep fitting until the layout has mostly settled, unless the user has taken over
   const auto_fit = () => {
     if (destroyed || settled) return;
     if (simulation.alpha() < 0.05) {
