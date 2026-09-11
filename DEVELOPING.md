@@ -4,9 +4,9 @@
 
 | Path | What it is |
 |---|---|
-| `local-connections/` | **The plugin. The source of truth.** `main.js`, `styles.css`, `manifest.json`, `README.md`, `d3.v7.min.js` |
-| `tools/check.sh` | Runs the six jsc tests. Run after every edit |
-| `tools/install.sh` | Verifies, then copies the five files into the vault (`-n` for a dry run) |
+| `local-connections/` | **The plugin. The source of truth.** `main.js`, `styles.css`, `manifest.json`, `README.md`, `d3.v7.min.js`, `offline-assets.json`, `runtime/`, `bundled-models/` |
+| `tools/check.sh` | Verifies bundled asset hashes and runs seven jsc suites. Run after every edit |
+| `tools/install.sh` | Verifies, then copies the complete plugin into the vault (`-n` for a dry run) |
 | `tools/modules.py` | Maps the ~380 modules inside `main.js` — the way to navigate 30k lines |
 | `tools/*_test.js` | The jsc tests themselves |
 | `tools/harness/` | Browser harness for the vault graph (real bundle + real d3, fake env); see *Testing the vault graph* |
@@ -38,7 +38,7 @@ embeddings has no such safety net.)
 ## The loop
 
 ```bash
-tools/check.sh          # 6 jsc tests, ~2s
+tools/check.sh          # asset verification and 7 jsc suites
 tools/install.sh        # checks, then copies to the vault
 ```
 
@@ -74,7 +74,7 @@ tools/modules.py "local connections"  # this fork's own appended sections
 ```
 
 **Everything this fork added is prefixed `lc_` / `LC_`.**
-`grep -n 'lc_' local-connections/main.js` is the fastest way to see fork code.
+`rg -n 'lc_' local-connections/main.js` is the fastest way to see fork code.
 The fork's own appended code sits in six banner sections at the end of the file
 — the embedded visualizer (~6,200 lines, mostly its d3) plus the Local
 Connections code:
@@ -203,3 +203,33 @@ Three places, by hand (the scripts used to do this):
 
 
 
+
+## Offline runtime and distribution (v1.11.0)
+
+Ship the entire `local-connections/` directory. The default Snowflake Arctic
+Embed XS q8 model, tokenizer, Transformers.js 4.2.0, ONNX Web backends and
+licenses are checked in. `offline-assets.json` records upstream revisions and
+SHA-256 hashes. `tools/offline_assets_check.sh [plugin-directory]` validates
+source or installed assets. This is a packaging integrity check, not an
+authenticated updater. When changing a vendored file, review its provenance
+and update its manifest hash deliberately. The Transformers bundle is patched
+to resolve backend modules/WASM from the plugin's local resource directory.
+
+`tools/install.sh` copies each file to a temporary sibling and verifies it
+before replacement, verifies the installed assets, then activates `main.js`
+last. It preserves `data.json`, imported `models/`, and explicit
+`downloaded-models/` installs. It is not a whole-directory transactional
+upgrade. Set `LC_INSTALL_DEST` to an existing temporary plugin directory for
+testing; the default destination is a real vault, so do not run it there
+without authorization.
+
+Inference uses local files only. Optional model downloads require an explicit
+settings action; pinned revisions, byte counts and SHA-256 hashes are checked
+before staged files are renamed into `downloaded-models/`. Download response
+streams are bounded to each pinned file size. Metadata has a 1 MB cap;
+`tokenizer.json` uses its larger pinned size. Public selections resolve through
+a local transport alias while retaining their original semantic profile.
+
+See `tools/OFFLINE_TESTING.md` for cold-browser inference checks (CPU, GPU,
+fallback and missing assets), installer fault injection and remaining native
+Obsidian/iOS checks. Use synthetic content only.

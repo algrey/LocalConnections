@@ -14,13 +14,18 @@ set -u
 JSC=/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
+if ! "$DIR/offline_assets_check.sh"; then
+  echo "Checks failed — bundled offline assets are incomplete or corrupted." >&2
+  exit 1
+fi
+
 if [ ! -x "$JSC" ]; then
   echo "FAIL: jsc not found at $JSC" >&2
   exit 1
 fi
 
 fail=0
-for t in smoke_test search_logic_test blocks_logic_test unembedded_notice_test vault_graph_logic_test review_regression_test; do
+for t in smoke_test search_logic_test blocks_logic_test unembedded_notice_test vault_graph_logic_test review_regression_test offline_download_test; do
   printf '%-24s ' "$t"
   if out=$("$JSC" "$DIR/$t.js" 2>&1); then
     echo "ok"

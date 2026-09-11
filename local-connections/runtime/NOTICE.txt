@@ -1,0 +1,9 @@
+Local Connections bundles these third-party runtime assets:
+
+@huggingface/transformers 4.2.0
+Apache License 2.0. See LICENSE-APACHE-2.0.txt and
+https://github.com/huggingface/transformers.js.
+
+onnxruntime-web 1.26.0-dev.20260416-b7804b056c
+MIT License. See https://github.com/microsoft/onnxruntime for the upstream
+license and notices.

@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "runtime": {
+    "transformers_js": "4.2.0",
+    "onnxruntime_web": "1.26.0-dev.20260416-b7804b056c",
+    "files": {
+      "runtime/transformers-4.2.0.js": "sha256:e99b3167a06a1fc7293cee6cf5fd5cdb425e163946cae759bb325332aac69214",
+      "runtime/ort-wasm-simd-threaded.asyncify.mjs": "sha256:5959c6733039619c9af710d8e1bae8d6e84402787990637be987c2b1bd6c5fa9",
+      "runtime/ort-wasm-simd-threaded.asyncify.wasm": "sha256:e0c0c6d3e73d43b8a249972f8358f845b08cc16fec3c80efafdf8bed40366786",
+      "runtime/ort-wasm-simd-threaded.jsep.mjs": "sha256:522b3769929f5684c83a12cf1e06eedf073b65d161728b4f3757c75d62b14384",
+      "runtime/ort-wasm-simd-threaded.jsep.wasm": "sha256:ae61141f8fbf0a4e43fd7b4f4d40a1a115627f6facc4f33ddf84074a655e33ea",
+      "runtime/ort-wasm-simd-threaded.mjs": "sha256:5f2cd914554830762579c372d0211614c1e3f40ab3f6c0cfcf0900343229071d",
+      "runtime/ort-wasm-simd-threaded.wasm": "sha256:f4f290847a4df02d0b93cdbf39b4b0e71acefbe80573e7e6b9342a7abd7b290a"
+    },
+    "license_files": {
+      "runtime/LICENSE-APACHE-2.0.txt": "sha256:cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "runtime/LICENSE-MIT-ONNXRUNTIME.txt": "sha256:2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+      "runtime/NOTICE.txt": "sha256:188dcf26f0c4421e81dc9d3425dacceebc63b14e75ad30a4c842fb995bd6e2e6",
+      "bundled-models/snowflake-arctic-embed-xs/LICENSE.txt": "sha256:c614a964d5391423b1c4fcf3e3272db880adf5d65c4ab2dca78a1ca1e7b941cf",
+      "bundled-models/snowflake-arctic-embed-xs/LICENSE-APACHE-2.0.txt": "sha256:cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+  },
+  "models": {
+    "snowflake-arctic-embed-xs": {
+      "source": "Snowflake/snowflake-arctic-embed-xs",
+      "revision": "d8c86521100d3556476a063fc2342036d45c106f",
+      "files": {
+        "config.json": "sha256:d7d071046ab952af96b7abad788db7ab3fc997b465e1b9914ff39707092254ec",
+        "tokenizer.json": "sha256:91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854",
+        "tokenizer_config.json": "sha256:9ca59277519f6e3692c8685e26b94d4afca2d5438deff66483db495e48735810",
+        "special_tokens_map.json": "sha256:5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a",
+        "vocab.txt": "sha256:07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3",
+        "1_Pooling/config.json": "sha256:83eeb6d0c128b377a452f121f8c5a19bbbf9322092a87b856ef782f4ad2326b9",
+        "onnx/model_quantized.onnx": "sha256:e6aa5e656466a73d7c3111e9a3378bd13e5b93af30eaac2b3f13fd56692589a1"
+      }
+    }
+  }
+}

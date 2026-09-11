@@ -51,6 +51,24 @@ var failure = null;
   }
   assert((await lc_read_json_file({ size: 17, text: async function () { return '{"hidden_size":384}'; } })).hidden_size === 384, "valid model config");
 
+  // Explicit downloads retain the public model key/embedding space while
+  // routing worker file reads through the isolated downloaded-models folder.
+  var alias_env = {
+    plugin: { manifest: { dir: ".obsidian/plugins/local-connections" }, app: { vault: { adapter: {
+      exists: async function (path) { return path.indexOf("downloaded-models/downloaded-TaylorAI-bge-micro-v2/") >= 0; },
+      readBinary: async function (path) { return new ArrayBuffer(path.endsWith("config.json") ? 8 : 16); }
+    } } } },
+    settings: { lc_local_models: { "downloaded-TaylorAI-bge-micro-v2": {
+      source_model_key: "TaylorAI/bge-micro-v2", storage_dir: "downloaded-models",
+      source_embedding_space_id: "TaylorAI/bge-micro-v2/legacy-space", dims: 384, max_tokens: 512
+    } } }
+  };
+  assert(lc_local_model_key_for_public(alias_env, "TaylorAI/bge-micro-v2") === "lc-local/downloaded-TaylorAI-bge-micro-v2", "public model maps to downloaded local transport key");
+  var alias_profile = lc_local_model_entry_to_profile("downloaded-TaylorAI-bge-micro-v2", alias_env.settings.lc_local_models["downloaded-TaylorAI-bge-micro-v2"]);
+  assert(alias_profile.semantic_profile.embedding_space_id === "TaylorAI/bge-micro-v2/legacy-space", "downloaded alias preserves embedding space fingerprint");
+  assert((await lc_read_local_model_file(alias_env, "downloaded-TaylorAI-bge-micro-v2/config.json")).byteLength === 8, "downloaded alias reads from isolated storage");
+  try { lc_validate_download_file("TaylorAI/bge-micro-v2", "config.json", 1, "wrong"); assert(false, "wrong download checksum rejected"); } catch (error) { assert(error.message.includes("Integrity check failed"), "wrong download checksum rejected"); }
+
   var warnings = [];
   var old_warn = console.warn;
   console.warn = function () { warnings.push(Array.from(arguments)); };

@@ -1,0 +1,10 @@
+Snowflake Arctic Embed XS
+
+Copyright Snowflake Inc.
+
+This model is licensed under the Apache License, Version 2.0. The model
+license and attribution are documented by the upstream model card:
+https://huggingface.co/Snowflake/snowflake-arctic-embed-xs
+
+The full Apache License, Version 2.0 text is included at:
+https://www.apache.org/licenses/LICENSE-2.0

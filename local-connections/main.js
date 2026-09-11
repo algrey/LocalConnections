@@ -1,4 +1,4 @@
-/*! local-connections v1.10.3 | private local-only fork of smart-connections-obsidian v4.7.2 (c) Brian Petro, MIT | phone-home code removed; embeddings are local-only upstream as of 4.7.x */
+/*! local-connections v1.11.0 | private local-only fork of smart-connections-obsidian v4.7.2 (c) Brian Petro, MIT | phone-home code removed; embeddings are local-only upstream as of 4.7.x */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -12933,7 +12933,7 @@ var SmartEmbedMessageAdapter = class extends SmartEmbedAdapter {
 };
 
 // node_modules/obsidian-smart-env/src/adapters/embedding-model/transformers_v4.worker.js
-var transformers_v4_worker_default = "// Force Transformers.js to select ONNX Runtime Web in Electron workers.\nglobalThis.process = undefined;\n\nconst transformers_v4_url = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0';\n\nfunction get_error_message(error) {\n  return error?.message || String(error || 'Unknown error');\n}\n\nasync function is_webgpu_available() {\n  if (!globalThis.navigator?.gpu) return false;\n  try {\n    const __adapter = await navigator.gpu.requestAdapter(); return Boolean(__adapter && __adapter.info);\n  } catch (_error) {\n    return false;\n  }\n}\n\nfunction copy_vector(data) {\n  return data instanceof Float32Array\n    ? new Float32Array(data)\n    : Float32Array.from(data || [])\n  ;\n}\n\nconst default_semantic_profile = {\n  pooling: 'mean',\n  normalize: true,\n  query_prefix: '',\n  document_prefix: '',\n};\n\n// --- Local Connections: serve `lc-local/<folder>` models from vault files ---\nconst LC_LOCAL_PREFIX = 'lc-local/';\nconst LC_LOCAL_MODEL_PATH = 'lc-local://models/';\nconst lc_native_fetch = globalThis.fetch.bind(globalThis);\nconst lc_pending_files = new Map();\nlet lc_file_request_id = 0;\n\nfunction lc_request_file(rel_path) {\n  return new Promise((resolve) => {\n    const id = 'lc_file_' + (lc_file_request_id++);\n    lc_pending_files.set(id, resolve);\n    self.postMessage({ lc_file_request: true, id, path: rel_path });\n  });\n}\n\nfunction lc_handle_file_response(data) {\n  const resolve = lc_pending_files.get(data.id);\n  if (!resolve) return;\n  lc_pending_files.delete(data.id);\n  resolve(data.buffer || null);\n}\n\nfunction lc_local_rel_path(url) {\n  let path = typeof url === 'string' ? url : (url && url.url) || String(url || '');\n  if (path.startsWith(LC_LOCAL_MODEL_PATH)) path = path.slice(LC_LOCAL_MODEL_PATH.length);\n  else if (!path.startsWith(LC_LOCAL_PREFIX)) return null;\n  if (path.startsWith(LC_LOCAL_PREFIX)) path = path.slice(LC_LOCAL_PREFIX.length);\n  return path;\n}\n\nasync function lc_fetch(url, init) {\n  const rel_path = lc_local_rel_path(url);\n  if (rel_path === null) return lc_native_fetch(url, init);\n  const buffer = await lc_request_file(rel_path);\n  if (!buffer) return new Response(null, { status: 404, statusText: 'Not Found' });\n  return new Response(buffer, {\n    status: 200,\n    headers: {\n      'Content-Length': String(buffer.byteLength),\n      'Content-Type': 'application/octet-stream',\n    },\n  });\n}\n\nfunction lc_configure_env(env, is_local) {\n  if (is_local) {\n    env.allowLocalModels = true;\n    env.allowRemoteModels = false;\n    env.localModelPath = LC_LOCAL_MODEL_PATH;\n    env.useBrowserCache = false;\n    env.useCustomCache = false;\n    env.fetch = lc_fetch;\n  } else {\n    env.allowLocalModels = false;\n    env.allowRemoteModels = true;\n    if (typeof env.useBrowserCache !== 'undefined') env.useBrowserCache = true;\n    env.fetch = lc_native_fetch;\n  }\n}\n\nclass TransformersWorkerModel {\n  constructor(params = {}) {\n    const configured_batch_size = Number(params.batch_size);\n    this.model_key = params.model_key;\n    this.revision = params.revision;\n    this.is_local = params.lc_local === true || String(params.model_key || '').startsWith(LC_LOCAL_PREFIX);\n    this.max_tokens = Number(params.max_tokens) || 512;\n    this.use_gpu = params.use_gpu !== false;\n    this.semantic_profile = {\n      ...default_semantic_profile,\n      ...params.semantic_profile,\n    };\n    this.configured_batch_size = Number.isFinite(configured_batch_size)\n      && configured_batch_size > 1\n      ? Math.min(16, Math.floor(configured_batch_size))\n      : null\n    ;\n    this.dtype = params.dtype || 'auto';\n    this.has_gpu = false;\n    this.pipeline = null;\n    this.tokenizer = null;\n    this.active_config_key = null;\n    this.transformers_module = null;\n  }\n\n  get gpu_enabled() {\n    return this.use_gpu && this.has_gpu;\n  }\n\n  get batch_size() {\n    if (this.configured_batch_size) return this.configured_batch_size;\n    return this.active_config_key?.includes('webgpu') ? 16 : 8;\n  }\n\n  async load() {\n    this.has_gpu = this.use_gpu\n      ? await is_webgpu_available()\n      : false\n    ;\n    await this.dispose_pipeline();\n\n    if (this.gpu_enabled) {\n      try {\n        await this.load_pipeline('webgpu');\n        return;\n      } catch (error) {\n        console.warn('[Transformers worker] WebGPU load failed, falling back to WASM', error);\n        this.use_gpu = false;\n        this.has_gpu = false;\n        await this.dispose_pipeline();\n      }\n    }\n\n    await this.load_pipeline('wasm');\n  }\n\n  async get_transformers_module() {\n    if (!this.transformers_module) {\n      const started_at = Date.now();\n      console.log('[Transformers worker] load: CDN v4 runtime starting');\n      this.transformers_module = await import(transformers_v4_url);\n      const { env, LogLevel } = this.transformers_module;\n      env.allowLocalModels = false;\n      if (typeof env.useBrowserCache !== 'undefined') {\n        env.useBrowserCache = true;\n      }\n      if (LogLevel) env.logLevel = LogLevel.ERROR;\n      console.log(\n        `[Transformers worker] load: CDN v4 runtime ready (${Date.now() - started_at} ms)`,\n      );\n    }\n    return this.transformers_module;\n  }\n\n  async load_pipeline(device) {\n    const { pipeline, env } = await this.get_transformers_module();\n    lc_configure_env(env, this.is_local);\n    const config_key = `${device}_${this.dtype}`;\n    const started_at = Date.now();\n    const pipeline_options = {\n      device,\n      dtype: this.dtype,\n    };\n    if (this.revision) pipeline_options.revision = this.revision;\n\n    console.log(`[Transformers worker] load: ONNX v4/${config_key} starting`);\n    this.pipeline = await pipeline(\n      'feature-extraction',\n      this.model_key,\n      pipeline_options,\n    );\n    this.tokenizer = this.pipeline.tokenizer;\n    if (!this.tokenizer) {\n      throw new Error('Transformers v4 pipeline tokenizer unavailable');\n    }\n    this.active_config_key = config_key;\n    console.log(\n      `[Transformers worker] load: ONNX v4/${config_key} ready (${Date.now() - started_at} ms)`,\n    );\n  }\n\n  async load_wasm_pipeline() {\n    this.use_gpu = false;\n    this.has_gpu = false;\n    await this.dispose_pipeline();\n    await this.load_pipeline('wasm');\n  }\n\n  async dispose_pipeline() {\n    const pipeline = this.pipeline;\n    this.pipeline = null;\n    this.tokenizer = null;\n    this.active_config_key = null;\n    if (!pipeline) return;\n\n    try {\n      if (typeof pipeline.dispose === 'function') {\n        await pipeline.dispose();\n      } else if (typeof pipeline.destroy === 'function') {\n        await pipeline.destroy();\n      }\n    } catch (error) {\n      console.warn('[Transformers worker] failed to dispose pipeline', error);\n    }\n  }\n\n  async count_tokens(input) {\n    if (!this.tokenizer) await this.load();\n    const { input_ids } = await this.tokenizer(input);\n    return { tokens: input_ids.data.length };\n  }\n\n  async embed_batch(inputs) {\n    if (!inputs.length) return [];\n\n    const results = new Array(inputs.length);\n    const pending_inputs = [];\n\n    inputs.forEach((item, input_i) => {\n      if (!item.embed_input?.length) {\n        results[input_i] = {\n          vec: [],\n          tokens: 0,\n          error: 'Embedding input is empty',\n        };\n        return;\n      }\n      pending_inputs.push({ input_i, item });\n    });\n\n    if (!pending_inputs.length) return results;\n    if (!this.pipeline) await this.load();\n\n    let pending_i = 0;\n    while (pending_i < pending_inputs.length) {\n      const batch_size = this.batch_size;\n      const batch_entries = pending_inputs.slice(pending_i, pending_i + batch_size);\n      const batch_inputs = batch_entries.map((entry) => entry.item);\n      const batch_results = await this.process_batch(batch_inputs);\n      const result_count = Array.isArray(batch_results) ? batch_results.length : 0;\n\n      if (result_count !== batch_inputs.length) {\n        throw new Error(\n          `Embedding batch returned ${result_count} results for ${batch_inputs.length} inputs`,\n        );\n      }\n\n      batch_entries.forEach((entry, result_i) => {\n        results[entry.input_i] = batch_results[result_i];\n      });\n      pending_i += batch_entries.length;\n    }\n    return results;\n  }\n\n  async process_batch(batch_inputs) {\n    let batch_error;\n\n    try {\n      return await this.embed_prepared_batch(batch_inputs);\n    } catch (error) {\n      batch_error = error;\n    }\n\n    if (this.active_config_key?.includes('webgpu')) {\n      console.warn('[Transformers worker] WebGPU batch failed, retrying on WASM', batch_error);\n      await this.load_wasm_pipeline();\n      try {\n        return await this.embed_prepared_batch(batch_inputs);\n      } catch (error) {\n        batch_error = error;\n      }\n    }\n\n    console.error('[Transformers worker] batch failed, retrying items individually', batch_error);\n    return this.retry_items_individually(batch_inputs);\n  }\n\n  async embed_prepared_batch(batch_inputs) {\n    const prepared = await Promise.all(\n      batch_inputs.map((item) => this.prepare_input(item.embed_input, item.purpose)),\n    );\n    const embed_inputs = prepared.map((item) => item.text);\n    const response = await this.pipeline(embed_inputs, {\n      pooling: this.semantic_profile.pooling,\n      normalize: this.semantic_profile.normalize,\n    });\n\n    return prepared.map((item, i) => ({\n      vec: copy_vector(response[i].data),\n      tokens: item.tokens,\n    }));\n  }\n\n  async prepare_input(embed_input, purpose = 'document') {\n    if (purpose !== 'query' && purpose !== 'document') {\n      throw new Error(`Unsupported embedding purpose: ${purpose}`);\n    }\n    const prefix = purpose === 'query'\n      ? this.semantic_profile.query_prefix\n      : this.semantic_profile.document_prefix\n    ;\n    const semantic_input = `${prefix}${embed_input}`;\n    let { tokens } = await this.count_tokens(semantic_input);\n    if (tokens <= this.max_tokens) {\n      return { text: semantic_input, tokens };\n    }\n\n    let truncated = semantic_input;\n    while (tokens > this.max_tokens && truncated.length > 0) {\n      const pct = this.max_tokens / tokens;\n      const max_chars = Math.floor(truncated.length * pct * 0.9);\n      truncated = truncated.slice(0, max_chars);\n      const last_space = truncated.lastIndexOf(' ');\n      if (last_space > 0) truncated = truncated.slice(0, last_space);\n      tokens = (await this.count_tokens(truncated)).tokens;\n    }\n    return { text: truncated, tokens };\n  }\n\n  async retry_items_individually(batch_inputs) {\n    const results = [];\n\n    for (const item of batch_inputs) {\n      try {\n        const prepared = await this.prepare_input(item.embed_input, item.purpose);\n        const response = await this.pipeline(prepared.text, {\n          pooling: this.semantic_profile.pooling,\n          normalize: this.semantic_profile.normalize,\n        });\n        results.push({\n          vec: copy_vector(response[0].data),\n          tokens: prepared.tokens,\n        });\n      } catch (error) {\n        console.error('[Transformers worker] single item failed', error);\n        results.push({\n          vec: [],\n          tokens: 0,\n          error: get_error_message(error),\n        });\n      }\n    }\n\n    return results;\n  }\n}\n\nlet model = null;\nlet request_queue = Promise.resolve();\n\nfunction get_transfer_list(result) {\n  if (!Array.isArray(result)) return [];\n  return result\n    .map((item) => item?.vec)\n    .filter((vec) => vec instanceof Float32Array)\n    .map((vec) => vec.buffer)\n  ;\n}\n\nasync function process_message(data = {}) {\n  const { method, params = {}, id } = data;\n\n  try {\n    let result;\n    switch (method) {\n      case 'load':\n        if (model) await model.dispose_pipeline();\n        model = new TransformersWorkerModel(params);\n        await model.load();\n        result = {\n          model_loaded: true,\n          model_config_key: model.active_config_key,\n        };\n        break;\n      case 'embed_batch':\n        if (!model) throw new Error('Model not loaded');\n        result = await model.embed_batch(params.inputs || []);\n        break;\n      case 'count_tokens':\n        if (!model) throw new Error('Model not loaded');\n        result = await model.count_tokens(params.input);\n        break;\n      default:\n        throw new Error(`Unknown method: ${method}`);\n    }\n\n    self.postMessage({\n      id,\n      result,\n      model_config_key: model?.active_config_key || null,\n    }, get_transfer_list(result));\n  } catch (error) {\n    console.error('[Transformers worker] request failed', error);\n    self.postMessage({\n      id,\n      error: get_error_message(error),\n      model_config_key: model?.active_config_key || null,\n    });\n  }\n}\n\nself.addEventListener('message', (event) => {\n  const data = event.data;\n  if (data && data.lc_file_response) {\n    lc_handle_file_response(data);\n    return;\n  }\n  request_queue = request_queue\n    .then(() => process_message(data))\n    .catch((error) => {\n      console.error('[Transformers worker] request queue failed', error);\n    })\n  ;\n});\n";
+var transformers_v4_worker_default = "// Force Transformers.js to select ONNX Runtime Web in Electron workers.\nglobalThis.process = undefined;\n\nconst transformers_v4_url = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0';\n\nfunction get_error_message(error) {\n  return error?.message || String(error || 'Unknown error');\n}\n\nasync function is_webgpu_available() {\n  if (!globalThis.navigator?.gpu) return false;\n  try {\n    const __adapter = await navigator.gpu.requestAdapter(); return Boolean(__adapter && __adapter.info);\n  } catch (_error) {\n    return false;\n  }\n}\n\nfunction copy_vector(data) {\n  return data instanceof Float32Array\n    ? new Float32Array(data)\n    : Float32Array.from(data || [])\n  ;\n}\n\nconst default_semantic_profile = {\n  pooling: 'mean',\n  normalize: true,\n  query_prefix: '',\n  document_prefix: '',\n};\n\n// --- Local Connections: serve `lc-local/<folder>` models from vault files ---\nconst LC_LOCAL_PREFIX = 'lc-local/';\nconst LC_LOCAL_MODEL_PATH = 'lc-local://models/';\nconst lc_native_fetch = globalThis.fetch.bind(globalThis);\nconst lc_pending_files = new Map();\nlet lc_file_request_id = 0;\n\nfunction lc_request_file(rel_path) {\n  return new Promise((resolve) => {\n    const id = 'lc_file_' + (lc_file_request_id++);\n    lc_pending_files.set(id, resolve);\n    self.postMessage({ lc_file_request: true, id, path: rel_path });\n  });\n}\n\nfunction lc_handle_file_response(data) {\n  const resolve = lc_pending_files.get(data.id);\n  if (!resolve) return;\n  lc_pending_files.delete(data.id);\n  resolve(data.buffer || null);\n}\n\nfunction lc_local_rel_path(url) {\n  let path = typeof url === 'string' ? url : (url && url.url) || String(url || '');\n  if (path.startsWith(LC_LOCAL_MODEL_PATH)) path = path.slice(LC_LOCAL_MODEL_PATH.length);\n  else if (!path.startsWith(LC_LOCAL_PREFIX)) return null;\n  if (path.startsWith(LC_LOCAL_PREFIX)) path = path.slice(LC_LOCAL_PREFIX.length);\n  return path;\n}\n\nasync function lc_fetch(url, init) {\n  const rel_path = lc_local_rel_path(url);\n  if (rel_path === null) return lc_native_fetch(url, init);\n  const buffer = await lc_request_file(rel_path);\n  if (!buffer) return new Response(null, { status: 404, statusText: 'Not Found' });\n  return new Response(buffer, {\n    status: 200,\n    headers: {\n      'Content-Length': String(buffer.byteLength),\n      'Content-Type': 'application/octet-stream',\n    },\n  });\n}\n\nfunction lc_configure_env(env, is_local) {\n  if (is_local) {\n    env.allowLocalModels = true;\n    env.allowRemoteModels = false;\n    env.localModelPath = LC_LOCAL_MODEL_PATH;\n    env.useBrowserCache = false;\n    env.useCustomCache = false;\n    env.fetch = lc_fetch;\n  } else {\n    env.allowLocalModels = false;\n    env.allowRemoteModels = true;\n    if (typeof env.useBrowserCache !== 'undefined') env.useBrowserCache = true;\n    env.fetch = lc_native_fetch;\n  }\n}\n\nclass TransformersWorkerModel {\n  constructor(params = {}) {\n    const configured_batch_size = Number(params.batch_size);\n    this.model_key = params.model_key;\n    this.revision = params.revision;\n    this.is_local = params.lc_local === true || String(params.model_key || '').startsWith(LC_LOCAL_PREFIX);\n    this.max_tokens = Number(params.max_tokens) || 512;\n    this.use_gpu = params.use_gpu !== false;\n    this.semantic_profile = {\n      ...default_semantic_profile,\n      ...params.semantic_profile,\n    };\n    this.configured_batch_size = Number.isFinite(configured_batch_size)\n      && configured_batch_size > 1\n      ? Math.min(16, Math.floor(configured_batch_size))\n      : null\n    ;\n    this.dtype = params.dtype || 'auto';\n    this.has_gpu = false;\n    this.pipeline = null;\n    this.tokenizer = null;\n    this.active_config_key = null;\n    this.transformers_module = null;\n  }\n\n  get gpu_enabled() {\n    return this.use_gpu && this.has_gpu;\n  }\n\n  get batch_size() {\n    if (this.configured_batch_size) return this.configured_batch_size;\n    return this.active_config_key?.includes('webgpu') ? 16 : 8;\n  }\n\n  async load() {\n    this.has_gpu = this.use_gpu\n      ? await is_webgpu_available()\n      : false\n    ;\n    await this.dispose_pipeline();\n\n    if (this.gpu_enabled) {\n      try {\n        await this.load_pipeline('webgpu');\n        return;\n      } catch (error) {\n        console.warn('[Transformers worker] WebGPU load failed, falling back to WASM', error);\n        this.use_gpu = false;\n        this.has_gpu = false;\n        await this.dispose_pipeline();\n      }\n    }\n\n    await this.load_pipeline('wasm');\n  }\n\n  async get_transformers_module() {\n    if (!this.transformers_module) {\n      const started_at = Date.now();\n      console.log('[Transformers worker] load: bundled v4 runtime starting');\n      this.transformers_module = await import(transformers_v4_url);\n      const { env, LogLevel } = this.transformers_module;\n      env.allowLocalModels = false;\n      if (typeof env.useBrowserCache !== 'undefined') {\n        env.useBrowserCache = true;\n      }\n      if (LogLevel) env.logLevel = LogLevel.ERROR;\n      console.log(\n        `[Transformers worker] load: bundled v4 runtime ready (${Date.now() - started_at} ms)`,\n      );\n    }\n    return this.transformers_module;\n  }\n\n  async load_pipeline(device) {\n    const { pipeline, env } = await this.get_transformers_module();\n    lc_configure_env(env, this.is_local);\n    const config_key = `${device}_${this.dtype}`;\n    const started_at = Date.now();\n    const pipeline_options = {\n      device,\n      dtype: this.dtype,\n    };\n    if (this.revision) pipeline_options.revision = this.revision;\n\n    console.log(`[Transformers worker] load: ONNX v4/${config_key} starting`);\n    this.pipeline = await pipeline(\n      'feature-extraction',\n      this.model_key,\n      pipeline_options,\n    );\n    this.tokenizer = this.pipeline.tokenizer;\n    if (!this.tokenizer) {\n      throw new Error('Transformers v4 pipeline tokenizer unavailable');\n    }\n    this.active_config_key = config_key;\n    console.log(\n      `[Transformers worker] load: ONNX v4/${config_key} ready (${Date.now() - started_at} ms)`,\n    );\n  }\n\n  async load_wasm_pipeline() {\n    this.use_gpu = false;\n    this.has_gpu = false;\n    await this.dispose_pipeline();\n    await this.load_pipeline('wasm');\n  }\n\n  async dispose_pipeline() {\n    const pipeline = this.pipeline;\n    this.pipeline = null;\n    this.tokenizer = null;\n    this.active_config_key = null;\n    if (!pipeline) return;\n\n    try {\n      if (typeof pipeline.dispose === 'function') {\n        await pipeline.dispose();\n      } else if (typeof pipeline.destroy === 'function') {\n        await pipeline.destroy();\n      }\n    } catch (error) {\n      console.warn('[Transformers worker] failed to dispose pipeline', error);\n    }\n  }\n\n  async count_tokens(input) {\n    if (!this.tokenizer) await this.load();\n    const { input_ids } = await this.tokenizer(input);\n    return { tokens: input_ids.data.length };\n  }\n\n  async embed_batch(inputs) {\n    if (!inputs.length) return [];\n\n    const results = new Array(inputs.length);\n    const pending_inputs = [];\n\n    inputs.forEach((item, input_i) => {\n      if (!item.embed_input?.length) {\n        results[input_i] = {\n          vec: [],\n          tokens: 0,\n          error: 'Embedding input is empty',\n        };\n        return;\n      }\n      pending_inputs.push({ input_i, item });\n    });\n\n    if (!pending_inputs.length) return results;\n    if (!this.pipeline) await this.load();\n\n    let pending_i = 0;\n    while (pending_i < pending_inputs.length) {\n      const batch_size = this.batch_size;\n      const batch_entries = pending_inputs.slice(pending_i, pending_i + batch_size);\n      const batch_inputs = batch_entries.map((entry) => entry.item);\n      const batch_results = await this.process_batch(batch_inputs);\n      const result_count = Array.isArray(batch_results) ? batch_results.length : 0;\n\n      if (result_count !== batch_inputs.length) {\n        throw new Error(\n          `Embedding batch returned ${result_count} results for ${batch_inputs.length} inputs`,\n        );\n      }\n\n      batch_entries.forEach((entry, result_i) => {\n        results[entry.input_i] = batch_results[result_i];\n      });\n      pending_i += batch_entries.length;\n    }\n    return results;\n  }\n\n  async process_batch(batch_inputs) {\n    let batch_error;\n\n    try {\n      return await this.embed_prepared_batch(batch_inputs);\n    } catch (error) {\n      batch_error = error;\n    }\n\n    if (this.active_config_key?.includes('webgpu')) {\n      console.warn('[Transformers worker] WebGPU batch failed, retrying on WASM', batch_error);\n      await this.load_wasm_pipeline();\n      try {\n        return await this.embed_prepared_batch(batch_inputs);\n      } catch (error) {\n        batch_error = error;\n      }\n    }\n\n    console.error('[Transformers worker] batch failed, retrying items individually', batch_error);\n    return this.retry_items_individually(batch_inputs);\n  }\n\n  async embed_prepared_batch(batch_inputs) {\n    const prepared = await Promise.all(\n      batch_inputs.map((item) => this.prepare_input(item.embed_input, item.purpose)),\n    );\n    const embed_inputs = prepared.map((item) => item.text);\n    const response = await this.pipeline(embed_inputs, {\n      pooling: this.semantic_profile.pooling,\n      normalize: this.semantic_profile.normalize,\n    });\n\n    return prepared.map((item, i) => ({\n      vec: copy_vector(response[i].data),\n      tokens: item.tokens,\n    }));\n  }\n\n  async prepare_input(embed_input, purpose = 'document') {\n    if (purpose !== 'query' && purpose !== 'document') {\n      throw new Error(`Unsupported embedding purpose: ${purpose}`);\n    }\n    const prefix = purpose === 'query'\n      ? this.semantic_profile.query_prefix\n      : this.semantic_profile.document_prefix\n    ;\n    const semantic_input = `${prefix}${embed_input}`;\n    let { tokens } = await this.count_tokens(semantic_input);\n    if (tokens <= this.max_tokens) {\n      return { text: semantic_input, tokens };\n    }\n\n    let truncated = semantic_input;\n    while (tokens > this.max_tokens && truncated.length > 0) {\n      const pct = this.max_tokens / tokens;\n      const max_chars = Math.floor(truncated.length * pct * 0.9);\n      truncated = truncated.slice(0, max_chars);\n      const last_space = truncated.lastIndexOf(' ');\n      if (last_space > 0) truncated = truncated.slice(0, last_space);\n      tokens = (await this.count_tokens(truncated)).tokens;\n    }\n    return { text: truncated, tokens };\n  }\n\n  async retry_items_individually(batch_inputs) {\n    const results = [];\n\n    for (const item of batch_inputs) {\n      try {\n        const prepared = await this.prepare_input(item.embed_input, item.purpose);\n        const response = await this.pipeline(prepared.text, {\n          pooling: this.semantic_profile.pooling,\n          normalize: this.semantic_profile.normalize,\n        });\n        results.push({\n          vec: copy_vector(response[0].data),\n          tokens: prepared.tokens,\n        });\n      } catch (error) {\n        console.error('[Transformers worker] single item failed', error);\n        results.push({\n          vec: [],\n          tokens: 0,\n          error: get_error_message(error),\n        });\n      }\n    }\n\n    return results;\n  }\n}\n\nlet model = null;\nlet request_queue = Promise.resolve();\n\nfunction get_transfer_list(result) {\n  if (!Array.isArray(result)) return [];\n  return result\n    .map((item) => item?.vec)\n    .filter((vec) => vec instanceof Float32Array)\n    .map((vec) => vec.buffer)\n  ;\n}\n\nasync function process_message(data = {}) {\n  const { method, params = {}, id } = data;\n\n  try {\n    let result;\n    switch (method) {\n      case 'load':\n        if (model) await model.dispose_pipeline();\n        model = new TransformersWorkerModel(params);\n        await model.load();\n        result = {\n          model_loaded: true,\n          model_config_key: model.active_config_key,\n        };\n        break;\n      case 'embed_batch':\n        if (!model) throw new Error('Model not loaded');\n        result = await model.embed_batch(params.inputs || []);\n        break;\n      case 'count_tokens':\n        if (!model) throw new Error('Model not loaded');\n        result = await model.count_tokens(params.input);\n        break;\n      default:\n        throw new Error(`Unknown method: ${method}`);\n    }\n\n    self.postMessage({\n      id,\n      result,\n      model_config_key: model?.active_config_key || null,\n    }, get_transfer_list(result));\n  } catch (error) {\n    console.error('[Transformers worker] request failed', error);\n    self.postMessage({\n      id,\n      error: get_error_message(error),\n      model_config_key: model?.active_config_key || null,\n    });\n  }\n}\n\nself.addEventListener('message', (event) => {\n  const data = event.data;\n  if (data && data.lc_file_response) {\n    lc_handle_file_response(data);\n    return;\n  }\n  request_queue = request_queue\n    .then(() => process_message(data))\n    .catch((error) => {\n      console.error('[Transformers worker] request queue failed', error);\n    })\n  ;\n});\n";
 
 // node_modules/obsidian-smart-env/src/adapters/embedding-model/transformers_v4_worker.js
 var transformers_default_batch_sizes = Object.freeze({
@@ -12955,15 +12955,19 @@ var transformers_models = {
       document_prefix: ""
     },
     name: "BGE-micro-v2 (fastest)",
-    description: "Local, 512 tokens, 384 dim (recommended)",
+    description: "Local, 512 tokens, 384 dim",
     adapter: "transformers"
   },
   "Snowflake/snowflake-arctic-embed-xs": {
     id: "Snowflake/snowflake-arctic-embed-xs",
+    // Keep the public model key and retrieval space stable while resolving
+    // first-install inference to the packaged model directory.
+    lc_bundle: true,
+    bundle_model_key: "snowflake-arctic-embed-xs",
     batch_size: 1,
     dims: 384,
     max_tokens: 512,
-    dtype: "auto",
+    dtype: "q8",
     semantic_profile: {
       embedding_space_id: "Snowflake/snowflake-arctic-embed-xs/retrieval-v1",
       pooling: "cls",
@@ -12971,8 +12975,8 @@ var transformers_models = {
       query_prefix: "Represent this sentence for searching relevant passages: ",
       document_prefix: ""
     },
-    name: "Snowflake Arctic Embed XS (fast)",
-    description: "Local, 512 tokens, 384 dim",
+    name: "Snowflake Arctic Embed XS (bundled)",
+    description: "Offline, 512 tokens, 384 dim (recommended)",
     adapter: "transformers"
   },
   "Snowflake/snowflake-arctic-embed-s": {
@@ -13052,7 +13056,7 @@ var TransformersWorkerEmbeddingModelAdapter = class extends SmartEmbedMessageAda
   static defaults = {
     adapter: "transformers",
     description: "Transformers (Local, built-in)",
-    default_model: "TaylorAI/bge-micro-v2",
+    default_model: "Snowflake/snowflake-arctic-embed-xs",
     models: transformers_models
   };
   constructor(model) {
@@ -13168,7 +13172,15 @@ var TransformersWorkerEmbeddingModelAdapter = class extends SmartEmbedMessageAda
     this.state = "loading";
     let worker = null;
     try {
-      const worker_blob = new Blob([transformers_v4_worker_default], { type: "text/javascript" });
+      const runtime = lc_transformers_runtime_urls(this.model?.env);
+      const worker_source = lc_prepare_transformers_worker_source(runtime.url, runtime.asset_base);
+      const public_model_key = this.model.model_key;
+      const public_profile = this.models[public_model_key] || {};
+      const transport_key = public_profile.lc_bundle
+        ? public_profile.bundle_model_key || public_model_key
+        : lc_local_model_key_for_public(this.model?.env, public_model_key) || public_model_key;
+      const transport_profile = this.models[transport_key] || public_profile;
+      const worker_blob = new Blob([worker_source], { type: "text/javascript" });
       this.worker_url = URL.createObjectURL(worker_blob);
       worker = new Worker(this.worker_url, { type: "module" });
       this.worker = worker;
@@ -13176,20 +13188,36 @@ var TransformersWorkerEmbeddingModelAdapter = class extends SmartEmbedMessageAda
       worker.onerror = this._handle_worker_error.bind(this);
       worker.onmessageerror = this._handle_worker_error.bind(this);
       await this._send_message("load", {
-        model_key: this.model.model_key,
-        revision: this.revision,
+        // Keep the configured public model key and semantic profile on the
+        // model object; only the transport key changes to an installed folder.
+        model_key: transport_key,
+        revision: transport_profile.lc_local ? void 0 : this.revision,
         max_tokens: this.model?.data?.max_tokens,
         batch_size: this.configured_batch_size,
         use_gpu: this.use_gpu,
-        dtype: this.dtype,
+        dtype: transport_profile.dtype || this.dtype,
         semantic_profile: this.semantic_profile,
-        lc_local: Boolean(this.models[this.model.model_key]?.lc_local)
+        // Every plugin model load is local-only. Bundled and imported models
+        // use the same worker bridge; unsupported built-ins fail locally with
+        // an install hint instead of silently fetching from the network.
+        lc_local: true,
+        lc_bundle: Boolean(public_profile.lc_bundle),
+        runtime_url: runtime.url,
+        runtime_asset_base: runtime.asset_base
       });
     } catch (error) {
       if (!worker || this.worker === worker) {
         this.destroy_worker();
         this.state = "unloaded";
         this.reset_model_state();
+      }
+      const profile = this.models[this.model.model_key] || {};
+      const detail = error?.message || String(error);
+      if (profile.lc_bundle && /not found|missing|local_files_only|unavailable/i.test(detail)) {
+        throw new Error("Bundled Arctic model files are incomplete. Reinstall Local Connections to restore its offline assets.");
+      }
+      if (!profile.lc_bundle && !profile.lc_local && !String(this.model.model_key || "").startsWith(LC_LOCAL_MODEL_PREFIX)) {
+        throw new Error(`Model “${this.model.model_key}” is not installed locally. Use Settings → Local Connections → Local embedding model files → Download supported model… first.`);
       }
       throw error;
     }
@@ -14167,7 +14195,7 @@ var default_settings = {
     embed_model: {
       adapter: "transformers",
       transformers: {
-        model_key: "TaylorAI/bge-micro-v2"
+        model_key: "Snowflake/snowflake-arctic-embed-xs"
       }
     },
     excluded_headings: "",
@@ -14542,7 +14570,7 @@ var EmbeddingModel = class extends Model {
     return {
       data: {
         provider_key: "transformers",
-        model_key: "TaylorAI/bge-micro-v2",
+        model_key: "Snowflake/snowflake-arctic-embed-xs",
         dims: 384,
         // ???
         max_tokens: 512
@@ -29049,6 +29077,12 @@ async function lc_render_visualizer_graph(connections_list, params = {}) {
 // ===== Local Connections settings UI / local models =====
 var LC_LOCAL_MODEL_PREFIX = "lc-local/";
 var LC_LOCAL_MODELS_DIR = "models";
+var LC_DOWNLOADED_MODELS_DIR = "downloaded-models";
+var LC_BUNDLED_MODEL_PREFIX = "lc-bundled/";
+var LC_BUNDLED_MODEL_NAME = "snowflake-arctic-embed-xs";
+var LC_BUNDLED_MODEL_DIR = "bundled-models/" + LC_BUNDLED_MODEL_NAME;
+var LC_RUNTIME_DIR = "runtime";
+var LC_RUNTIME_FILE = "transformers-4.2.0.js";
 var LC_MAX_IMPORT_BYTES = 2 * 1024 * 1024 * 1024;
 var LC_ONNX_PREFERENCE = [
   "model_quantized.onnx",
@@ -29062,6 +29096,243 @@ var LC_ONNX_PREFERENCE = [
   "model_bnb4.onnx"
 ];
 var LC_HF_MODELS_URL = "https://huggingface.co/models?library=transformers.js&pipeline_tag=feature-extraction&sort=downloads";
+var LC_DOWNLOAD_MODELS = Object.freeze({
+  "TaylorAI/bge-micro-v2": { name: "bge-micro-v2", revision: "3edf6d7de0faa426b09780416fe61009f26ae589", pooling: "mean", onnx_file: "onnx/model_quantized.onnx", files: { "config.json": [745, "86d7047bf568a9263c7020fb4950741b19b1df3de3539385d83d9e3df1e56c5b"], "tokenizer.json": [711661, "cb374d6bc042c22455946f4e09a89d29882a199fdaf8fb25be00dc8b8857a448"], "tokenizer_config.json": [1564, "dd949ead2951e7ea7d28aa67da9c351d09563b424bc9747115f4660a826390ea"], "special_tokens_map.json": [228, "cb63d0cbbf45160dc9cd786a257759593b798ae0c72957011016dbc3972df4e4"], "vocab.txt": [231508, "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"], "1_Pooling/config.json": [270, "4fff808dd5634889dc20e89268de2b842b8ff4345519ecc5d71985cdaf124c5b"], "onnx/model_quantized.onnx": [17409774, "ed65e36025aa94cb74207dab863c85452919ec0ab7df3512092932aa22c9a33a"] } },
+  "Snowflake/snowflake-arctic-embed-s": { name: "snowflake-arctic-embed-s", revision: "e596f507467533e48a2e17c007f0e1dacc837b33", pooling: "cls", onnx_file: "onnx/model_quantized.onnx", files: { "config.json": [703, "4e519aa92ec40943356032afe458c8829d70c5766b109e4a57490b82f72dcfb7"], "tokenizer.json": [711649, "91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854"], "tokenizer_config.json": [1433, "9ca59277519f6e3692c8685e26b94d4afca2d5438deff66483db495e48735810"], "special_tokens_map.json": [695, "5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a"], "vocab.txt": [231508, "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"], "1_Pooling/config.json": [296, "83eeb6d0c128b377a452f121f8c5a19bbbf9322092a87b856ef782f4ad2326b9"], "onnx/model_quantized.onnx": [34015111, "f93ff225320628d2e88baf2a395cae791b0e3b27edf5c70bf7b312a4d3260c14"] } },
+  "Xenova/multilingual-e5-small": { name: "multilingual-e5-small", revision: "761b726dd34fb83930e26aab4e9ac3899aa1fa78", pooling: "mean", query_prefix: "query: ", document_prefix: "passage: ", onnx_file: "onnx/model_quantized.onnx", files: { "config.json": [658, "cb99455288675345e1a4f411438d5d0adbba5fbd3a67ea4fb03c015433b996c1"], "tokenizer.json": [17082730, "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39"], "tokenizer_config.json": [443, "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b"], "special_tokens_map.json": [167, "d05497f1da52c5e09554c0cd874037a083e1dc1b9cfd48034d1c717f1afc07a7"], "onnx/model_quantized.onnx": [118308185, "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193"] } },
+  "onnx-community/granite-embedding-97m-multilingual-r2-ONNX": { name: "granite-embedding-97m-multilingual-r2-ONNX", revision: "536a9f241cb3f02a9c5995a1e708c784bd274859", pooling: "cls", onnx_file: "onnx/model_quantized.onnx", files: { "config.json": [1215, "ae74d55a56f779774cb9a8e63d3c2da9ae1af83c00229ffdff43d0b38407a0ee"], "tokenizer.json": [25301671, "51947676cae1f991fa51c6b9a24e14ee5460e5f0b9f692f13bb3159829d1592a"], "tokenizer_config.json": [12860, "6ed69389e30a8ecabfce2f9ebcdf0c908b34056f24d994340f2f216521c057d5"], "special_tokens_map.json": [871, "013787ee251ff611722479197c00853b62113ad303cb0a36524231783c676c69"], "onnx/model_quantized.onnx": [97858099, "704c1ebca5fbb7cd83ced41827658ac4c9990c64f7f2874d22b78044e5022e22"] } },
+  "onnx-community/DenseOn-ONNX": { name: "DenseOn-ONNX", revision: "8606070c911ab26c582ce23db387abd3885541f2", pooling: "cls", query_prefix: "query: ", document_prefix: "document: ", onnx_file: "onnx/model_quantized.onnx", files: { "config.json": [1208, "f295786e36cabd2023fd17bbf048f355926bb80a9ced63d22826f3310f70a9dd"], "tokenizer.json": [3583485, "3703d011b3ee259e00b59b60772f8fd54998d79e8fa5a1388d507eff28f8f09e"], "tokenizer_config.json": [21030, "edfd0094f4f888388e1a0215d2f4a0c800c04c2604b5605dfed3c2cf35f4bf6c"], "special_tokens_map.json": [694, "ea97ecdbcc73713039d8d64dbb05e3689495c96657fbd9a18f5bed381be81049"], "onnx/model_quantized.onnx": [149906833, "73920e2aa82fcc9b1b1020dfe0a39e2df69e14b7a8c7d7a8c4dbb1949acd1364"] } }
+});
+function lc_download_model_label(model_id) {
+  const labels = {
+    "TaylorAI/bge-micro-v2": "BGE Micro v2",
+    "Snowflake/snowflake-arctic-embed-s": "Snowflake Arctic Embed S",
+    "Xenova/multilingual-e5-small": "Multilingual E5 Small",
+    "onnx-community/granite-embedding-97m-multilingual-r2-ONNX": "Granite Multilingual R2",
+    "onnx-community/DenseOn-ONNX": "DenseOn"
+  };
+  return labels[model_id] || model_id;
+}
+
+async function lc_sha256(buffer) {
+  if (!globalThis.crypto?.subtle) return null;
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(digest), (v) => v.toString(16).padStart(2, "0")).join("");
+}
+function lc_validate_download_file(model_id, rel_path, byte_length, sha256) {
+  const expected = LC_DOWNLOAD_MODELS[model_id]?.files?.[rel_path];
+  if (!expected) throw new Error("File is not in the supported download manifest.");
+  if (byte_length !== expected[0] || sha256 !== expected[1]) throw new Error(`Integrity check failed for ${model_id}/${rel_path}`);
+  return true;
+}
+async function lc_fetch_allowed_model_file(model_id, revision, rel_path) {
+  const spec = LC_DOWNLOAD_MODELS[model_id];
+  const expected = spec?.files?.[rel_path];
+  if (!spec || revision !== spec.revision || !Object.prototype.hasOwnProperty.call(spec.files, rel_path)) {
+    throw new Error("Model revision or file is not in the supported download manifest.");
+  }
+  const metadata = rel_path.endsWith(".json") && rel_path !== "tokenizer.json";
+  const limit = metadata ? 1024 * 1024 : LC_MAX_IMPORT_BYTES;
+  if (!Number.isSafeInteger(expected[0]) || expected[0] < 1 || expected[0] > limit) {
+    throw new Error(`${rel_path} exceeds the supported size limit`);
+  }
+  const [org, repo] = model_id.split("/");
+  const url = `https://huggingface.co/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/resolve/${encodeURIComponent(spec.revision)}/${rel_path}?download=true`;
+  const response = await fetch(url, { cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer" });
+  if (!response.ok) return null;
+  const size = Number(response.headers.get("content-length"));
+  if (Number.isFinite(size) && size > expected[0]) {
+    await response.body?.cancel();
+    throw new Error(`Integrity check failed for ${model_id}/${rel_path}: oversized response`);
+  }
+  // Allocate only the pinned size; stop even headerless/chunked responses at
+  // this boundary instead of trusting arrayBuffer() to bound network input.
+  if (!response.body?.getReader) throw new Error("Streaming model downloads are unavailable.");
+  const reader = response.body.getReader();
+  const bytes = new Uint8Array(expected[0]);
+  let offset = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (offset + value.byteLength > bytes.byteLength) throw new Error(`Integrity check failed for ${model_id}/${rel_path}: oversized response`);
+      bytes.set(value, offset);
+      offset += value.byteLength;
+    }
+    if (offset !== expected[0]) throw new Error(`Integrity check failed for ${model_id}/${rel_path}: incomplete response`);
+  } catch (error) {
+    try { await reader.cancel(); } catch (_cancel_error) { }
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  const buffer = bytes.buffer;
+  const sha256 = await lc_sha256(buffer);
+  lc_validate_download_file(model_id, rel_path, buffer.byteLength, sha256);
+  return { buffer, sha256 };
+}
+function lc_parse_download_json(file, rel_path) {
+  if (!file) throw new Error(`Model is missing ${rel_path}`);
+  if (file.buffer.byteLength > 1024 * 1024) throw new Error(`${rel_path} exceeds the 1 MB limit`);
+  let value;
+  try { value = JSON.parse(new TextDecoder().decode(file.buffer)); } catch (_error) { throw new Error(`${rel_path} is not valid JSON`); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${rel_path} must be a JSON object`);
+  return value;
+}
+var LC_ACTIVE_MODEL_DOWNLOADS = new WeakSet();
+async function lc_download_supported_model(env, model_id, report = null) {
+  if (LC_ACTIVE_MODEL_DOWNLOADS.has(env)) throw new Error("A model download is already in progress.");
+  LC_ACTIVE_MODEL_DOWNLOADS.add(env);
+  try {
+    return await lc_install_supported_model(env, model_id, report);
+  } finally {
+    LC_ACTIVE_MODEL_DOWNLOADS.delete(env);
+  }
+}
+async function lc_install_supported_model(env, model_id, report) {
+  const spec = LC_DOWNLOAD_MODELS[model_id];
+  if (!spec) throw new Error("Choose a model from the supported download list.");
+  const revision = spec.revision;
+  if (Object.values(spec.files).reduce((sum, file) => sum + file[0], 0) > LC_MAX_IMPORT_BYTES) throw new Error("Model exceeds the supported download size limit.");
+  const files = Object.keys(spec.files || {}).filter((rel) => rel !== spec.onnx_file && rel !== "LICENSE");
+  const fetched = new Map();
+  for (const rel of files) {
+    if (typeof report === "function") report(`Downloading ${model_id}/${rel}…`);
+    const file = await lc_fetch_allowed_model_file(model_id, revision, rel);
+    if (file) fetched.set(rel, file);
+  }
+  const config = lc_parse_download_json(fetched.get("config.json"), "config.json");
+  const tokenizer_config = lc_parse_download_json(fetched.get("tokenizer_config.json"), "tokenizer_config.json");
+  let onnx = null;
+  if (typeof report === "function") report(`Downloading ${model_id}/${spec.onnx_file}…`);
+  onnx = await lc_fetch_allowed_model_file(model_id, revision, spec.onnx_file);
+  if (onnx) fetched.set(spec.onnx_file, onnx);
+  const missing = ["config.json", "tokenizer.json", "tokenizer_config.json"] .filter((rel) => !fetched.has(rel));
+  if (!onnx) missing.push("onnx/model_quantized.onnx (or another supported precision)");
+  if (missing.length) throw new Error(`Model is missing ${missing.join(", ")}`);
+  const adapter = lc_vault_adapter(env);
+  if (!adapter) throw new Error("Vault adapter unavailable.");
+  const dims = config && typeof config === "object" && !Array.isArray(config)
+    ? Number(config.hidden_size || config.d_model || config.dim || config.n_embd || config.embedding_size)
+    : NaN;
+  if (!config || typeof config !== "object" || Array.isArray(config) || !Number.isFinite(dims) || dims < 1 || dims > 65536) {
+    throw new Error("Downloaded config.json is not a valid encoder configuration.");
+  }
+  const planned = Array.from(fetched.values()).reduce((sum, file) => sum + file.buffer.byteLength, 0);
+  if (planned > LC_MAX_IMPORT_BYTES) throw new Error(`${lc_format_bytes(planned)} exceeds the ${lc_format_bytes(LC_MAX_IMPORT_BYTES)} limit`);
+  const registry = lc_get_local_models_registry(env, true);
+  const stem = lc_sanitize_model_name(`downloaded-${model_id.replace("/", "-")}`);
+  let name = stem;
+  let suffix = 2;
+  const dest_base = lc_downloaded_models_base_dir(env);
+  while (Object.prototype.hasOwnProperty.call(registry, name) || await adapter.exists(`${dest_base}/${name}`)) name = `${stem}-${suffix++}`;
+  const dest = `${dest_base}/${name}`;
+  const staging = `${dest_base}/.staging-${name}-${Date.now()}`;
+  let bytes = 0;
+  const checksums = {};
+  try {
+    await lc_ensure_dir(adapter, staging);
+    for (const [rel, file] of fetched) {
+      const dest_path = `${staging}/${rel}`;
+      await lc_ensure_dir(adapter, dest_path.split("/").slice(0, -1).join("/"));
+      await adapter.writeBinary(dest_path, file.buffer);
+      bytes += file.buffer.byteLength;
+      if (file.sha256) checksums[rel] = file.sha256;
+    }
+    if (typeof adapter.rename !== "function") throw new Error("Vault adapter cannot atomically install a downloaded model.");
+    await adapter.rename(staging, dest);
+  } catch (error) {
+    if (typeof adapter.rmdir === "function") {
+      try { await adapter.rmdir(staging, true); } catch (_cleanup_error) { }
+    }
+    throw error;
+  }
+  const source = transformers_models[model_id];
+  const semantic = source?.semantic_profile || spec;
+  registry[name] = {
+    name: model_id,
+    storage_dir: LC_DOWNLOADED_MODELS_DIR,
+    source_model_key: model_id,
+    source_embedding_space_id: transformers_models[model_id]?.semantic_profile?.embedding_space_id || model_id,
+    source_repo: model_id,
+    revision,
+    dims,
+    max_tokens: source?.max_tokens || lc_guess_profile(name, config, tokenizer_config, null).max_tokens,
+    pooling: semantic.pooling || "mean",
+    normalize: semantic.normalize !== false,
+    query_prefix: semantic.query_prefix || "",
+    document_prefix: semantic.document_prefix || "",
+    dtype: "q8",
+    onnx_files: [Array.from(fetched.keys()).find((r) => r.startsWith("onnx/"))?.slice(5)].filter(Boolean),
+    bytes,
+    checksums,
+    added_at: Date.now()
+  };
+  lc_sync_local_transformers_models(env);
+  return { name, bytes };
+}
+
+function lc_plugin_dir(env) {
+  return env?.plugin?.manifest?.dir || `${lc_obsidian_app(env)?.vault?.configDir || ".obsidian"}/plugins/local-connections`;
+}
+function lc_plugin_resource_url(env, rel_path) {
+  const path = `${lc_plugin_dir(env)}/${rel_path}`;
+  const adapter = lc_vault_adapter(env);
+  if (typeof adapter?.getResourcePath === "function") return adapter.getResourcePath(path);
+  if (typeof globalThis.app?.vault?.adapter?.getResourcePath === "function") return globalThis.app.vault.adapter.getResourcePath(path);
+  // Test harnesses and unusual adapters can provide a base URL explicitly.
+  const base = env?.plugin?.lc_resource_base || globalThis.__LC_RESOURCE_BASE__;
+  if (base) return new URL(rel_path, String(base).replace(/\/?$/, "/")).href;
+  throw new Error(`Local Connections runtime resource path unavailable for ${rel_path}`);
+}
+function lc_transformers_runtime_urls(env) {
+  const runtime_url = lc_plugin_resource_url(env, `${LC_RUNTIME_DIR}/${LC_RUNTIME_FILE}`);
+  const asset_base = lc_plugin_resource_url(env, `${LC_RUNTIME_DIR}/`).replace(/[^/]*$/, "");
+  return { url: runtime_url, asset_base };
+}
+function lc_prepare_transformers_worker_source(runtime_url, asset_base) {
+  if (!runtime_url || !asset_base) throw new Error("Bundled Transformers.js runtime assets are unavailable.");
+  const needle = "const transformers_v4_url = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0';";
+  const replacement = `const transformers_v4_url = ${JSON.stringify(runtime_url)};\nconst __lc_runtime_asset_base = ${JSON.stringify(asset_base)};`;
+  if (!transformers_v4_worker_default.includes(needle)) throw new Error("Pinned Transformers.js worker source is incompatible.");
+  return transformers_v4_worker_default.replace(needle, replacement).replace(
+    "const LC_LOCAL_MODEL_PATH = 'lc-local://models/';",
+    "const LC_LOCAL_MODEL_PATH = 'lc-local://models/';\nconst LC_BUNDLED_MODEL_PATH = 'lc-bundled://models/';"
+  ).replace(
+    "function lc_request_file(rel_path) {",
+    "function lc_request_file(rel_path, bundle = false) {"
+  ).replace(
+    "self.postMessage({ lc_file_request: true, id, path: rel_path });",
+    "self.postMessage({ lc_file_request: true, id, path: rel_path, bundle });"
+  ).replace(
+    "if (path.startsWith(LC_LOCAL_MODEL_PATH)) path = path.slice(LC_LOCAL_MODEL_PATH.length);",
+    "let bundle = false;\n  if (path.startsWith(LC_BUNDLED_MODEL_PATH)) { bundle = true; path = path.slice(LC_BUNDLED_MODEL_PATH.length); }\n  else if (path.startsWith(LC_LOCAL_MODEL_PATH)) path = path.slice(LC_LOCAL_MODEL_PATH.length);"
+  ).replace(
+    "else if (!path.startsWith(LC_LOCAL_PREFIX)) return null;",
+    "else if (!path.startsWith(LC_LOCAL_PREFIX)) return null;"
+  ).replace(
+    "return path;\n}\n\nasync function lc_fetch(url, init) {",
+    "return { path, bundle };\n}\n\nasync function lc_fetch(url, init) {"
+  ).replace(
+    "const rel_path = lc_local_rel_path(url);\n  if (rel_path === null) return lc_native_fetch(url, init);\n  const buffer = await lc_request_file(rel_path);",
+    "const request = lc_local_rel_path(url);\n  if (request === null) return lc_native_fetch(url, init);\n  const buffer = await lc_request_file(request.path, request.bundle);"
+  ).replace(
+    "function lc_configure_env(env, is_local) {\n  if (is_local) {",
+    "function lc_configure_env(env, is_local, is_bundle) {\n  if (is_local) {"
+  ).replace(
+    "env.localModelPath = LC_LOCAL_MODEL_PATH;",
+    "env.localModelPath = is_bundle ? LC_BUNDLED_MODEL_PATH : LC_LOCAL_MODEL_PATH;"
+  ).replace(
+    "this.is_local = params.lc_local === true || String(params.model_key || '').startsWith(LC_LOCAL_PREFIX);",
+    "this.is_bundle = params.lc_bundle === true;\n    this.is_local = params.lc_local === true || this.is_bundle || String(params.model_key || '').startsWith(LC_LOCAL_PREFIX);\n    this.runtime_url = params.runtime_url;\n    this.runtime_asset_base = params.runtime_asset_base;"
+  ).replace(
+    "this.transformers_module = await import(transformers_v4_url);",
+    "globalThis.__LC_TRANSFORMERS_ASSET_BASE__ = this.runtime_asset_base || __lc_runtime_asset_base;\n      this.transformers_module = await import(this.runtime_url || transformers_v4_url);"
+  ).replace(
+    "lc_configure_env(env, this.is_local);",
+    "lc_configure_env(env, this.is_local, this.is_bundle);"
+  );
+}
 
 function lc_get_local_models_registry(env, create = false) {
   if (!env?.settings) return {};
@@ -29078,15 +29349,21 @@ function lc_local_model_entry_to_profile(name, entry) {
   const document_prefix = typeof entry.document_prefix === "string" ? entry.document_prefix : "";
   const dims = Number(entry.dims) || 384;
   const max_tokens = Number(entry.max_tokens) || 512;
+  const source = transformers_models[entry.source_model_key]?.semantic_profile;
+  const matches_source = source && pooling === source.pooling
+    && normalize === (source.normalize !== false)
+    && query_prefix === (source.query_prefix || "")
+    && document_prefix === (source.document_prefix || "");
   return {
     id: LC_LOCAL_MODEL_PREFIX + name,
     lc_local: true,
+    source_model_key: entry.source_model_key || null,
     batch_size: 1,
     dims,
     max_tokens,
     dtype: entry.dtype || "auto",
     semantic_profile: {
-      embedding_space_id: `${LC_LOCAL_MODEL_PREFIX}${name}/${pooling}-${normalize ? "normalized" : "raw"}/${encodeURIComponent(query_prefix)}|${encodeURIComponent(document_prefix)}`,
+      embedding_space_id: (matches_source && entry.source_embedding_space_id) || `${LC_LOCAL_MODEL_PREFIX}${name}/${pooling}-${normalize ? "normalized" : "raw"}/${encodeURIComponent(query_prefix)}|${encodeURIComponent(document_prefix)}`,
       pooling,
       normalize,
       query_prefix,
@@ -29108,6 +29385,15 @@ function lc_sync_local_transformers_models(env) {
   }
   return transformers_models;
 }
+function lc_local_model_key_for_public(env, public_key) {
+  const registry = lc_get_local_models_registry(env);
+  for (const [name, entry] of Object.entries(registry)) {
+    if (entry && typeof entry === "object" && entry.source_model_key === public_key && lc_valid_model_name(name)) {
+      return LC_LOCAL_MODEL_PREFIX + name;
+    }
+  }
+  return null;
+}
 function lc_obsidian_app(env) {
   return env?.plugin?.app || env?.main?.app || globalThis.app;
 }
@@ -29115,8 +29401,10 @@ function lc_vault_adapter(env) {
   return lc_obsidian_app(env)?.vault?.adapter;
 }
 function lc_local_models_base_dir(env) {
-  const plugin_dir = env?.plugin?.manifest?.dir || `${lc_obsidian_app(env)?.vault?.configDir || ".obsidian"}/plugins/local-connections`;
-  return `${plugin_dir}/${LC_LOCAL_MODELS_DIR}`;
+  return `${lc_plugin_dir(env)}/${LC_LOCAL_MODELS_DIR}`;
+}
+function lc_downloaded_models_base_dir(env) {
+  return `${lc_plugin_dir(env)}/${LC_DOWNLOADED_MODELS_DIR}`;
 }
 function lc_resolve_onnx_fallback(entry, file_rel) {
   const match = /^onnx\/(model[^/]*?)\.onnx(_data|\.data)?$/.exec(file_rel);
@@ -29128,11 +29416,24 @@ function lc_resolve_onnx_fallback(entry, file_rel) {
   const chosen = [...LC_ONNX_PREFERENCE, ...available].find((f) => available.includes(f));
   return chosen ? `onnx/${chosen}${ext}` : null;
 }
-async function lc_read_local_model_file(env, rel_path) {
+async function lc_read_local_model_file(env, rel_path, bundled = false) {
   // requested by the Transformers.js runtime inside the worker: allowlist every segment
   if (typeof rel_path !== "string" || !rel_path) return null;
   const segments = rel_path.split("/").filter(Boolean);
-  if (segments.length < 2 || segments.some((seg) => seg === ".." || !/^[A-Za-z0-9._-]+$/.test(seg))) return null;
+  if (segments.some((seg) => seg === ".." || !/^[A-Za-z0-9._-]+$/.test(seg))) return null;
+  if (bundled) {
+    const bundled_model_prefixes = ["Snowflake/snowflake-arctic-embed-xs/", `${LC_BUNDLED_MODEL_NAME}/`];
+    const bundled_prefix = bundled_model_prefixes.find((prefix) => rel_path.startsWith(prefix));
+    if (bundled_prefix) rel_path = rel_path.slice(bundled_prefix.length);
+    const allowed = /^(?:config\.json|tokenizer\.json|tokenizer_config\.json|special_tokens_map\.json|vocab\.txt|1_Pooling\/config\.json|onnx\/model_quantized\.onnx)$/;
+    if (!allowed.test(rel_path)) return null;
+    const adapter = lc_vault_adapter(env);
+    if (!adapter) return null;
+    const path = `${lc_plugin_dir(env)}/${LC_BUNDLED_MODEL_DIR}/${rel_path}`;
+    if (!await adapter.exists(path)) return null;
+    return await adapter.readBinary(path);
+  }
+  if (segments.length < 2) return null;
   const [name, ...rest] = segments;
   const registry = lc_get_local_models_registry(env);
   if (!lc_valid_model_name(name) || !Object.prototype.hasOwnProperty.call(registry, name)) return null;
@@ -29140,7 +29441,8 @@ async function lc_read_local_model_file(env, rel_path) {
   if (!entry || typeof entry !== "object") return null;
   const adapter = lc_vault_adapter(env);
   if (!adapter) return null;
-  const model_dir = `${lc_local_models_base_dir(env)}/${name}`;
+  const storage_dir = entry.storage_dir === LC_DOWNLOADED_MODELS_DIR ? LC_DOWNLOADED_MODELS_DIR : LC_LOCAL_MODELS_DIR;
+  const model_dir = `${lc_plugin_dir(env)}/${storage_dir}/${name}`;
   const file_rel = rest.join("/");
   let path = `${model_dir}/${file_rel}`;
   if (!await adapter.exists(path)) {
@@ -29157,7 +29459,7 @@ async function lc_handle_worker_file_request(adapter, data) {
   const worker = adapter.worker;
   let buffer = null;
   try {
-    buffer = await lc_read_local_model_file(adapter.model?.env, data?.path);
+    buffer = await lc_read_local_model_file(adapter.model?.env, data?.path, data?.bundle === true);
   } catch (error) {
     console.warn("[Local Connections] failed to read local model file", data?.path, error);
   }
@@ -29327,6 +29629,17 @@ function lc_models_using(env, key) {
   const items = env?.embedding_models?.filter?.((m) => !m.deleted && m.data?.model_key === key) || [];
   return items;
 }
+function lc_update_local_model_profile(env, name, patch) {
+  const target = lc_get_local_models_registry(env)[name];
+  if (!target) return;
+  Object.assign(target, patch);
+  lc_sync_local_transformers_models(env);
+  const key = LC_LOCAL_MODEL_PREFIX + name;
+  for (const item of lc_models_using(env, key)) {
+    item.model_changed("model_key", key);
+    item.debounce_save();
+  }
+}
 async function lc_use_local_model(env, name) {
   lc_sync_local_transformers_models(env);
   const key = LC_LOCAL_MODEL_PREFIX + name;
@@ -29344,9 +29657,12 @@ async function lc_use_local_model(env, name) {
 async function lc_remove_local_model(env, name) {
   if (!lc_valid_model_name(name)) throw new Error(`Invalid model name: ${name}`);
   const key = LC_LOCAL_MODEL_PREFIX + name;
-  if (lc_models_using(env, key).length) throw new Error("This model is selected by an embedding model configuration. Switch models first.");
+  const entry = lc_get_local_models_registry(env)[name];
+  const public_key = entry?.source_model_key;
+  if (lc_models_using(env, key).length || public_key && lc_models_using(env, public_key).length) throw new Error("This model is selected by an embedding model configuration. Switch models first.");
   const adapter = lc_vault_adapter(env);
-  const dir = `${lc_local_models_base_dir(env)}/${name}`;
+  const storage_dir = entry?.storage_dir === LC_DOWNLOADED_MODELS_DIR ? LC_DOWNLOADED_MODELS_DIR : LC_LOCAL_MODELS_DIR;
+  const dir = `${lc_plugin_dir(env)}/${storage_dir}/${name}`;
   if (adapter && await adapter.exists(dir)) await adapter.rmdir(dir, true);
   const registry = lc_get_local_models_registry(env, true);
   delete registry[name];
@@ -29423,6 +29739,10 @@ function lc_render_local_models_help(section) {
   p1.appendText(" (768 dim), ");
   p1.createEl("code", { text: "Xenova/multilingual-e5-small" });
   p1.appendText(" (multilingual). Larger dimensions are slower and produce larger embedding files.");
+  const supported = body.createEl("p");
+  supported.appendText("The explicit download button supports: ");
+  supported.appendText(Object.keys(LC_DOWNLOAD_MODELS).join(", "));
+  supported.appendText(". Downloads are copied into the local model folder and remain available offline afterward.");
   const p2 = body.createEl("p");
   p2.appendText("Download the whole repository into one folder named after the model, keeping the ");
   p2.createEl("code", { text: "onnx/" });
@@ -29481,6 +29801,33 @@ async function lc_render_local_models(env, parent) {
     heading.addButton((btn) => {
       btn.setButtonText("Add model folder\u2026").setCta();
       btn.onClick(() => file_input.click());
+    });
+    let selected_download_model = Object.keys(LC_DOWNLOAD_MODELS)[0];
+    heading.addDropdown((dd) => {
+      for (const [model_id] of Object.entries(LC_DOWNLOAD_MODELS)) dd.addOption(model_id, lc_download_model_label(model_id));
+      dd.setValue(selected_download_model);
+      dd.onChange((value) => { if (LC_DOWNLOAD_MODELS[value]) selected_download_model = value; });
+    });
+    heading.addButton((btn) => {
+      btn.setButtonText("Download supported model\u2026");
+      btn.onClick(async () => {
+        const model_id = selected_download_model;
+        if (!Object.prototype.hasOwnProperty.call(LC_DOWNLOAD_MODELS, model_id)) {
+          new Notice("Unsupported model. Choose a model from the supported download list.", 10000);
+          return;
+        }
+        const notice = new Notice(`Downloading ${model_id}\u2026`, 0);
+        try {
+          const result = await lc_download_supported_model(env, model_id, (msg) => notice.setMessage(msg));
+          notice.hide();
+          new Notice(`Installed ${model_id} (${lc_format_bytes(result.bytes)}). Choose it in Embedding \u2192 Model.`, 10000);
+        } catch (error) {
+          notice.hide();
+          console.error("[Local Connections] supported model download failed", error);
+          new Notice(`Could not download model: ${error?.message || error}`, 12000);
+        }
+        await render();
+      });
     });
     file_input.addEventListener("change", async () => {
       const files = file_input.files;
@@ -29570,18 +29917,9 @@ async function lc_render_local_models(env, parent) {
         btn.onClick(() => { if (!used_by) show_confirm("remove"); });
       });
 
-      const profile = new Setting(section).setName("Embedding profile").setDesc("Pooling and the text prefixes the model card asks for. Changing these while the model is in use rebuilds its embeddings.");
+      const profile = new Setting(section).setName("Embedding profile").setDesc("Pooling and the text prefixes the model card asks for. Changing these while the model is in use rebuilds its embeddings." + (entry.source_model_key ? " These edits apply only when the (local files) entry is selected; the original model selection keeps its standard profile." : ""));
       profile.settingEl.addClass("lc-local-model__profile");
-      const update_entry = (patch) => {
-        const target = lc_get_local_models_registry(env, true)[name];
-        if (!target) return;
-        Object.assign(target, patch);
-        lc_sync_local_transformers_models(env);
-        for (const item of lc_models_using(env, key)) {
-          item.model_changed("model_key", key);
-          item.debounce_save();
-        }
-      };
+      const update_entry = (patch) => lc_update_local_model_profile(env, name, patch);
       profile.addDropdown((dd) => {
         dd.addOption("mean", "Mean pooling");
         dd.addOption("cls", "CLS pooling");
