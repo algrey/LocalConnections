@@ -20,7 +20,7 @@ if [ ! -x "$JSC" ]; then
 fi
 
 fail=0
-for t in smoke_test search_logic_test blocks_logic_test unembedded_notice_test vault_graph_logic_test; do
+for t in smoke_test search_logic_test blocks_logic_test unembedded_notice_test vault_graph_logic_test review_regression_test; do
   printf '%-24s ' "$t"
   if out=$("$JSC" "$DIR/$t.js" 2>&1); then
     echo "ok"

@@ -3,6 +3,12 @@
 Local-only fork of [Smart Connections](https://github.com/brianpetro/obsidian-smart-connections) (MIT, © Brian Petro) with a visualiser inspired by https://github.com/Mossy1022/Smart-Connections-Visualizer, a simple semantic search and a whole-vault semantic graph (canvas renderer adapted from [Smart Vault Visualizer](https://github.com/Mossy1022/Smart-Connections-Vault-Visualizer), MIT © 2024 Mossy1022).
 It is simple, local only, and all functionality lives in a single side window. Off by default on mobile. 
 
+Embedding inference runs on your device. The embedding worker loads its
+Transformers.js runtime from jsDelivr, and built-in models can download model
+files. Imported local models use vault files for their weights and tokenizer,
+but still use the CDN runtime; importing a model does not make the plugin fully
+offline.
+
 
 - v1.10.3 — security and efficiency pass. Block heading text and note keys are HTML-escaped in the connections/search result rows and the graph error message (a heading containing HTML ran as HTML), "Render markdown" off now shows note text as text rather than parsing it as HTML, the local-model registry name is validated before it reaches rmdir/readBinary, the worker's model-file requests are allow-listed per path segment, importing a model folder refuses more than 2 GB up front, and settings merges skip prototype keys. Faster: note-link collection for the vault graph is driven by outlinks instead of comparing every pair, k-means reuses its accumulators, the canvas strokes all note links in one path and builds font strings once per frame, the find box matches a precomputed lower-case string, the link threshold no longer restarts the physics in the projected layouts or rebuilds the legend, the previous force-graph simulation is stopped when the Connections graph re-renders, and the minimum note length setting re-imports once after typing pauses instead of on the first digit. The vault graph uses its own window's animation frame and pixel ratio in popouts.
 - v1.10.2 — the Connections view's hamburger menu works with no note open (it did nothing: the view attached its button listeners only after finding a source item). Settings, Graph style, *Open vault graph*, Open random connection, Change target and the drop target work without a note; *Refresh connections*, *Expand/Collapse all*, *Copy as list of links*, *Unhide all* and *Unpin all* are greyed out until a note is open.
