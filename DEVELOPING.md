@@ -5,7 +5,7 @@
 | Path | What it is |
 |---|---|
 | `local-connections/` | **The plugin. The source of truth.** `main.js`, `styles.css`, `manifest.json`, `README.md`, `d3.v7.min.js` |
-| `tools/check.sh` | Runs the five jsc tests. Run after every edit |
+| `tools/check.sh` | Runs the six jsc tests. Run after every edit |
 | `tools/install.sh` | Verifies, then copies the five files into the vault (`-n` for a dry run) |
 | `tools/modules.py` | Maps the ~380 modules inside `main.js` — the way to navigate 30k lines |
 | `tools/*_test.js` | The jsc tests themselves |
@@ -38,7 +38,7 @@ embeddings has no such safety net.)
 ## The loop
 
 ```bash
-tools/check.sh          # 5 jsc tests, ~2s
+tools/check.sh          # 6 jsc tests, ~2s
 tools/install.sh        # checks, then copies to the vault
 ```
 

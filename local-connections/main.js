@@ -1038,7 +1038,7 @@ var SmartEnv = class {
    * Handle load attempts after load
    */
   handle_env_load_attempt_after_loaded(incoming_env) {
-    console.warn("Received attempt to load another SmartEnv after one has already loaded", incoming_env);
+    console.warn("Received attempt to load another SmartEnv after one has already loaded");
     console.warn(new Error("Stacktrace of SmartEnv load attempt after environment is already loaded"));
   }
   async run_load() {
@@ -2342,7 +2342,11 @@ var replace_html = /* @__PURE__ */ (() => {
     if (!tpl) {
       tpl = document.createElement("template");
       tpl.innerHTML = key;
-      cache.set(key, tpl);
+      // Bound retained markup; note previews and changing settings can be unique.
+      if (key.length <= 16384) {
+        if (cache.size >= 128) cache.delete(cache.keys().next().value);
+        cache.set(key, tpl);
+      }
     }
     container.replaceChildren(tpl.content.cloneNode(true));
   };
@@ -7257,11 +7261,7 @@ var SmartSource = class extends SmartEntity {
     const lowercased_keywords = keywords.map((keyword) => keyword.toLowerCase());
     const content = await this.read();
     if (!content || typeof content !== "string" || !content.length) {
-      if (content.mime_type) {
-        console.warn(`Entity.search: No content available for searching: ${this.path}, mime_type: ${content.mime_type}`);
-      } else {
-        console.warn(`Entity.search: No content available for searching: ${this.path}, content: ${content ? JSON.stringify(content) : "empty"}`);
-      }
+      console.warn("Entity.search: No searchable text available");
       return 0;
     }
     const lowercased_content = content.toLowerCase();
@@ -9520,7 +9520,7 @@ var AjsonSingleFileCollectionDataAdapter = class extends AjsonMultiFileCollectio
           }
         }
       } catch (err) {
-        console.warn("parse error for line: ", line, err);
+        console.warn("AJSON parse error at line", i + 1);
         rewrite = true;
       }
       line_count++;
@@ -16082,8 +16082,8 @@ function build_html7(model, params) {
   return `<div class="model-info">
     <div class="smart-env-settings-header">
       <div class="model-info-content">
-        <b>${model.display_name} <span class="test-result-icon" data-icon="${get_test_result_icon_name(model)}"></span></b>
-        <pre>${details.join("    ")}</pre>
+        <b>${escape_html(model.display_name)} <span class="test-result-icon" data-icon="${get_test_result_icon_name(model)}"></span></b>
+        <pre>${escape_html(details.join("    "))}</pre>
       </div>
       <div class="model-actions">
         <div class="model-action-buttons">
@@ -17149,12 +17149,10 @@ function replace_folders_top_var(prompt) {
 
 // node_modules/obsidian-smart-env/utils/replace_recent_n_var.js
 function replace_recent_n_var(prompt) {
-  console.log("replace_recent_n_var", prompt);
   const env = this;
   return prompt.replace(/{{\s*recent_(\d+)\s*}}/gi, (_, count) => {
     const n = parseInt(count, 10) || 0;
     const files = Object.values(env.smart_sources?.fs?.files ?? {}).sort((a, b) => b.stat.mtime - a.stat.mtime).slice(0, n).map((f) => f.path).join("\n  - ");
-    console.log("replace_recent_n_var", n, files);
     return files ? `
   - ${files}` : "";
   }).trim();
@@ -18252,7 +18250,7 @@ function handle_env_load_attempt_after_loaded(env) {
     if (plugin_instance) {
       setTimeout(() => {
         try {
-          console.log(`Unloading deferred plugin "${plugin_id}"`, plugin_instance);
+          console.log(`Unloading deferred plugin "${plugin_id}"`);
           plugin_instance._loaded = true;
           plugin_instance.unload();
         } catch (error) {
@@ -18296,7 +18294,7 @@ function handle_outdated_plugins() {
     if (plugin_instance) {
       setTimeout(() => {
         try {
-          console.log(`Unloading outdated plugin "${plugin_id}"`, plugin_instance);
+          console.log(`Unloading outdated plugin "${plugin_id}"`);
           plugin_instance._loaded = true;
           plugin_instance.unload();
         } catch (error) {
@@ -27458,7 +27456,6 @@ var ScGraphItemView = class extends LC_VisualizerBase {
   async onOpen() {
     this.contentEl.createEl("h2", { text: "Local Connections graph" });
     this.contentEl.createEl("p", { text: "Waiting for Local Connections to load..." });
-    console.log(this.app);
     setTimeout(() => {
       this.render();
     }, 500);
@@ -27491,7 +27488,6 @@ var ScGraphItemView = class extends LC_VisualizerBase {
     const maxRetries = 10;
     const delay = 2e3;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
-      console.log(this.env);
       if ((_a = this.env) == null ? void 0 : _a.collections_loaded) {
         return;
       }
@@ -27535,6 +27531,7 @@ var ScGraphItemView = class extends LC_VisualizerBase {
     this.updateLabelOpacity(event.transform.k);
   }
   initializeSimulation(width, height) {
+    this.simulation?.stop();
     this.simulation = simulation_default().force("center", center_default(width / 2, height / 2).strength(this.centerForce)).force("charge", manyBody_default().strength(-this.repelForce)).force("link", link_default().id((d) => d.id).distance((d) => d.lc_wikilink ? this.linkDistance : this.linkDistanceScale(d.score)).strength(this.linkForce)).force("collide", collide_default().radius(this.nodeSize + 3).strength(0.7)).on("tick", this.simulationTickHandler.bind(this));
     this.simulation.force("labels", this.avoidLabelCollisions.bind(this));
   }
@@ -28235,6 +28232,7 @@ var ScGraphItemView = class extends LC_VisualizerBase {
     });
   }
   async updateVisualization(newScoreThreshold) {
+    if (this.lc_disposed) return;
     if (this.updatingVisualization && !this.isChangingConnectionType) {
       this.updatingVisualization = false;
       this.currentNoteChanging = false;
@@ -28245,6 +28243,7 @@ var ScGraphItemView = class extends LC_VisualizerBase {
       this.relevanceScoreThreshold = newScoreThreshold;
     }
     await this.updateConnections();
+    if (this.lc_disposed) return;
     const filteredConnections = this.connections.filter((connection) => connection.lc_wikilink || connection.score >= this.relevanceScoreThreshold);
     const visibleNodes = /* @__PURE__ */ new Set();
     filteredConnections.forEach((connection) => {
@@ -28320,6 +28319,7 @@ var ScGraphItemView = class extends LC_VisualizerBase {
     this.centralNote = this.lc_center || this.smartNotes[this.currentNoteKey];
     if (!this.centralNote) return;
     const connections = this.lc_results || await this.centralNote.find_connections();
+    if (this.lc_disposed) return;
     this.lc_all_connections = Array.isArray(connections) ? connections : [];
     const noteConnections = connections.filter(
       (connection) => connection.score >= this.relevanceScoreThreshold
@@ -28369,7 +28369,7 @@ var ScGraphItemView = class extends LC_VisualizerBase {
         this.addConnectionNode(connectionId, connection);
         this.addConnectionLink(connectionId, connection);
       } else {
-        console.warn(`Skipping invalid connection at index ${index2}:`, connection);
+        console.warn(`Skipping invalid connection at index ${index2}`);
       }
     });
   }
@@ -28467,7 +28467,7 @@ var ScGraphItemView = class extends LC_VisualizerBase {
     });
     nodes.forEach((node, index2) => {
       if (!node.hasOwnProperty("id") || !node.hasOwnProperty("name") || !node.hasOwnProperty("group")) {
-        console.error(`Node at index ${index2} is missing required properties: ${JSON.stringify(node)}`);
+        console.error(`Node at index ${index2} is missing required properties`);
         isValid = false;
       }
     });
@@ -28981,6 +28981,7 @@ async function lc_render_visualizer_graph(connections_list, params = {}) {
   // Stop the previous render's d3 simulation: it would otherwise keep ticking
   // on a detached container until its alpha decays (search-as-you-type re-renders often).
   const prev_view = connections_list._lc_visualizer_view;
+  if (prev_view) prev_view.lc_disposed = true;
   if (prev_view?.simulation && typeof prev_view.simulation.stop === "function") {
     try {
       prev_view.simulation.stop();
@@ -28989,6 +28990,11 @@ async function lc_render_visualizer_graph(connections_list, params = {}) {
   }
   const view = new LC_VISUALIZER.ScGraphItemView(null, shim_plugin);
   connections_list._lc_visualizer_view = view;
+  this.attach_disposer(container, () => {
+    view.lc_disposed = true;
+    view.simulation?.stop();
+    if (connections_list._lc_visualizer_view === view) connections_list._lc_visualizer_view = null;
+  });
   view.app = app2;
   view.contentEl = container;
   view.currentNoteKey = to_item?.source_key || to_item?.key || "";
@@ -29003,6 +29009,7 @@ async function lc_render_visualizer_graph(connections_list, params = {}) {
   // container once (viewBox + simulation centre), so a 0x0 measurement would
   // leave the graph permanently blank.
   const show_error = (err) => {
+    if (connections_list._lc_visualizer_view !== view || !container.isConnected) return;
     const el = container.ownerDocument.createElement("div");
     el.className = "lc-visualizer-empty";
     el.innerHTML = '<div class="lc-visualizer-empty-title">Force graph failed to render</div>';
@@ -29013,6 +29020,7 @@ async function lc_render_visualizer_graph(connections_list, params = {}) {
   };
   let attempts = 0;
   const start = () => {
+    if (connections_list._lc_visualizer_view !== view) return;
     const ready = container.isConnected && container.clientWidth > 0 && container.clientHeight > 0;
     if (!ready && attempts++ < 180) {
       window.requestAnimationFrame(start);
@@ -29114,7 +29122,9 @@ function lc_resolve_onnx_fallback(entry, file_rel) {
   const match = /^onnx\/(model[^/]*?)\.onnx(_data|\.data)?$/.exec(file_rel);
   if (!match) return null;
   const ext = match[2] || "";
-  const available = Array.isArray(entry.onnx_files) ? entry.onnx_files : [];
+  const available = Array.isArray(entry.onnx_files)
+    ? entry.onnx_files.filter((file) => typeof file === "string" && /^[A-Za-z0-9_-][A-Za-z0-9._-]*\.onnx$/.test(file))
+    : [];
   const chosen = [...LC_ONNX_PREFERENCE, ...available].find((f) => available.includes(f));
   return chosen ? `onnx/${chosen}${ext}` : null;
 }
@@ -29216,7 +29226,15 @@ async function lc_ensure_dir(adapter, path) {
   await adapter.mkdir(path);
 }
 async function lc_read_json_file(file) {
-  return JSON.parse(await file.text());
+  // Model metadata is tiny; reject oversized configs before allocating/parsing them.
+  if (!file || !Number.isFinite(file.size) || file.size > 1024 * 1024) {
+    throw new Error("Model configuration exceeds the 1 MB limit");
+  }
+  const value = JSON.parse(await file.text());
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Model configuration must be a JSON object");
+  }
+  return value;
 }
 async function lc_import_model_files(env, file_list, report = null) {
   const files = Array.from(file_list || []);
