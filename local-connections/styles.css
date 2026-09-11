@@ -765,6 +765,23 @@ a.sc-result-file-title > small.sc-breadcrumb-separator {
   padding: 2px;
   background: transparent;
 }
+.lc-visualizer-graph .lc-visualizer-vault-graph {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 1;
+  padding: 2px;
+  height: auto;
+  border: none;
+  border-radius: 1px;
+  box-shadow: none;
+  background: transparent;
+  color: #7c849c;
+}
+.lc-visualizer-graph .lc-visualizer-vault-graph svg {
+  width: 24px;
+  height: 24px;
+}
 /* gear menu header: "Graph Settings" title left, reset/close icons right */
 .lc-visualizer-graph .smart-connections-visualizer-menu-header {
   justify-content: space-between;
