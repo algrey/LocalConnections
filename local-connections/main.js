@@ -28966,6 +28966,12 @@ async function lc_render_visualizer_graph(connections_list, params = {}) {
   const container = frag.firstElementChild;
   const to_item = params.to_item || connections_list.item;
   const app2 = env.plugin?.app || window.app;
+  const vault_graph_button = container.createEl("button", {
+    cls: "clickable-icon lc-visualizer-vault-graph",
+    attr: { type: "button", "aria-label": lc_vault_graph_ribbon_icons.lc_vault_graph.description }
+  });
+  require("obsidian").setIcon(vault_graph_button, lc_vault_graph_ribbon_icons.lc_vault_graph.icon_name);
+  vault_graph_button.addEventListener("click", () => lc_vault_graph_open.call(connections_list));
   const shim_plugin = {
     app: app2,
     settings: lc_get_visualizer_settings(env),
