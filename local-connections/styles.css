@@ -1096,7 +1096,10 @@ svg .smart-connections-visualizer-nodes circle {
 .lc-env-settings-section {
   margin-top: var(--size-4-8);
 }
-.lc-local-models {
+.lc-models-settings {
+  margin-top: var(--size-4-6);
+}
+.lc-models-settings .lc-settings-panel + .lc-settings-panel {
   margin-top: var(--size-4-6);
 }
 .lc-local-models__help {
@@ -1139,21 +1142,6 @@ svg .smart-connections-visualizer-nodes circle {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-accent);
-}
-.lc-local-model__profile {
-  border-top: none;
-  padding-top: 0;
-}
-.lc-local-model__profile .setting-item-control {
-  flex-wrap: wrap;
-  gap: var(--size-4-2);
-}
-.lc-local-model__profile .setting-item-control input[type="text"] {
-  width: 11em;
-}
-.lc-local-model__confirm {
-  padding: 0 0 var(--size-4-3);
-  flex-wrap: wrap;
 }
 
 /* ===== local connections: semantic search ===== */
@@ -1432,4 +1420,89 @@ svg .smart-connections-visualizer-nodes circle {
 .lc-vault-graph-empty-title {
   font-weight: 600;
   color: var(--text-normal);
+}
+
+/* ===== local connections: settings intro, settings panels, model cards ===== */
+.lc-settings-intro h1 {
+  margin-bottom: var(--size-4-2);
+}
+.lc-settings-intro__text {
+  margin: 0 0 var(--size-4-4);
+  max-width: 72ch;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: var(--line-height-tight);
+}
+.lc-settings-panel {
+  background: var(--background-primary-alt);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-l);
+  padding: var(--size-4-4) var(--size-4-5);
+}
+.lc-settings-panel__title {
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+.lc-settings-panel__heading .setting-item-description {
+  padding-top: var(--size-2-1);
+}
+.lc-settings-panel .lc-local-models__help {
+  margin: var(--size-4-2) 0 var(--size-4-3) var(--size-4-4);
+}
+.lc-local-models__subheading {
+  margin: var(--size-4-4) 0 0;
+  padding-top: var(--size-4-3);
+  border-top: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+.lc-local-models__subheading + .setting-item {
+  border-top: none;
+}
+.lc-local-models__row .setting-item-control {
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+}
+/* model cards: name, details, then the buttons underneath */
+.lc-model-card {
+  padding: var(--size-4-3) 0;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.lc-settings-panel__heading + .lc-model-card {
+  margin-top: var(--size-4-3);
+}
+.lc-model-card__name b {
+  overflow-wrap: anywhere;
+}
+.lc-model-card__details {
+  padding-top: var(--size-2-1);
+}
+.lc-model-card.is-missing .lc-model-card__details {
+  color: var(--text-error);
+}
+.lc-model-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-2);
+}
+.lc-model-card__confirm {
+  flex-wrap: wrap;
+  margin-top: var(--size-4-2);
+}
+.lc-model-card__actions[hidden],
+.lc-model-card__confirm[hidden] {
+  display: none !important;
+}
+.lc-model-card__result {
+  margin-top: var(--size-4-2);
+  user-select: text;
+}
+.lc-model-card__result:empty {
+  display: none;
+}
+.lc-model-profile-modal__intro p {
+  margin: 0 0 var(--size-4-2);
 }

@@ -5154,6 +5154,17 @@ var DefaultEntitiesVectorAdapter = class extends EntitiesVectorAdapter {
             batch_results = await this.embed_batch(batch);
             this.total_time += Date.now() - start_time;
           } catch (error) {
+            if (error?.message === "Message adapter unloaded") {
+              // The embedding model was switched or unloaded mid-run. Stop this
+              // run quietly; the model-change handler restarts the queue with
+              // the new model.
+              console.log(`[smart_env] ${this.collection.collection_key} embed run stopped: the embedding model changed.`);
+              this._embed_run_error = true;
+              this._embed_run_interrupted = true;
+              this.is_queue_halted = true;
+              this._set_progress_state(null);
+              break;
+            }
             console.error(`Error processing ${this.collection.collection_key} embed queue:`, error);
             this._emit_embedding_error({
               message: `Embedding failed while processing ${this.collection.collection_key}.`,
@@ -5424,6 +5435,7 @@ var DefaultEntitiesVectorAdapter = class extends EntitiesVectorAdapter {
     this.current_queue_total = 0;
     this.progress_state = null;
     this._embed_run_error = false;
+    this._embed_run_interrupted = false;
     this._resume_after_pause = false;
     this._resume_after_pause_delay = 0;
     if (this._resume_embed_timeout) {
@@ -13127,6 +13139,26 @@ var TransformersWorkerEmbeddingModelAdapter = class extends SmartEmbedMessageAda
     return Promise.resolve(this.load()).catch((error) => {
       if (error?.message === "Message adapter unloaded") return;
       console.error(`[${this.constructor.name}] load failed`, error);
+      this.notify_load_failed(error, "load_background");
+    });
+  }
+  /**
+   * Surface a failed load as an error event (native notice), deduplicated so a
+   * repeated failure with the same cause does not stack notices.
+   * @param {Error} error
+   * @param {string} [event_source]
+   */
+  notify_load_failed(error, event_source = "load") {
+    const details = error?.message || String(error || "");
+    const now = Date.now();
+    const last = this._last_load_notice;
+    if (last && last.details === details && now - last.at < 3e4) return;
+    this._last_load_notice = { details, at: now };
+    this.model?.env?.events?.emit?.("embed_model:load_failed", {
+      level: "error",
+      message: `Failed to load embedding model ${this.model?.model_key || ""}.`,
+      details,
+      event_source
     });
   }
   get load_key() {
@@ -13152,7 +13184,17 @@ var TransformersWorkerEmbeddingModelAdapter = class extends SmartEmbedMessageAda
     if (this._load_promise && this._load_key === load_key) {
       return this._load_promise;
     }
-    const load_promise = this._load_worker();
+    const load_promise = this._load_worker().then(
+      () => {
+        this._last_load_failure = null;
+      },
+      (error) => {
+        if (error?.message !== "Message adapter unloaded") {
+          this._last_load_failure = { details: error?.message || String(error || ""), at: Date.now() };
+        }
+        throw error;
+      }
+    );
     this._load_key = load_key;
     const tracked_promise = load_promise.finally(() => {
       if (this._load_promise !== tracked_promise) return;
@@ -13217,7 +13259,7 @@ var TransformersWorkerEmbeddingModelAdapter = class extends SmartEmbedMessageAda
         throw new Error("Bundled Arctic model files are incomplete. Reinstall Local Connections to restore its offline assets.");
       }
       if (!profile.lc_bundle && !profile.lc_local && !String(this.model.model_key || "").startsWith(LC_LOCAL_MODEL_PREFIX)) {
-        throw new Error(`Model “${this.model.model_key}” is not installed locally. Use Settings → Local Connections → Local embedding model files → Download supported model… first.`);
+        throw new Error(`Model “${this.model.model_key}” is not installed locally. Use Settings → Local Connections → Add a local model → Download and install… first.`);
       }
       throw error;
     }
@@ -13245,13 +13287,36 @@ var TransformersWorkerEmbeddingModelAdapter = class extends SmartEmbedMessageAda
     super.unload();
   }
   /**
+   * Ensure a live, loaded worker before posting work. A failed or crashed load
+   * is retried on the next call, with a short backoff so repeated implicit
+   * retries do not keep spinning up workers for a model that cannot load.
+   * @returns {Promise<void>}
+   */
+  async ensure_loaded() {
+    if (this.worker && this.state === "loaded" && this._load_key === this.load_key) return;
+    const failure = this._last_load_failure;
+    if (failure && !this._load_promise && Date.now() - failure.at < 1e4) {
+      throw new Error(failure.details);
+    }
+    await this.load();
+  }
+  async count_tokens(input) {
+    await this.ensure_loaded();
+    return super.count_tokens(input);
+  }
+  async embed_batch(inputs) {
+    if (!inputs?.length) return [];
+    await this.ensure_loaded();
+    return super.embed_batch(inputs);
+  }
+  /**
    * Post a request to the worker.
    * @protected
    * @param {Object} message_data
    */
   _post_message(message_data) {
     if (!this.worker) {
-      throw new Error("Transformers worker not loaded");
+      throw new Error("Transformers worker not loaded. The embedding model failed to load or its worker stopped; retrying the load.");
     }
     this.worker.postMessage(message_data);
   }
@@ -14589,6 +14654,9 @@ var EmbeddingModel = class extends Model {
   }
   async test_model() {
     try {
+      // Load (or retry a failed load) first so a load error reports its real
+      // cause instead of a generic "worker not loaded" from the message bridge.
+      if (typeof this.instance?.load === "function") await this.instance.load();
       const resp = await this.embed("test input");
       const success = resp && !resp?.error;
       this.data.test_passed = success;
@@ -16711,8 +16779,7 @@ async function post_process12(env, container, opts = {}) {
   const models_container = container.querySelector(".models-container");
   const sources_container = container.querySelector(".sources-container");
   render_if_available.call(this, "settings_env_sources", env, sources_container);
-  render_if_available.call(this, "settings_env_models", env, models_container);
-  lc_render_local_models.call(this, env, models_container);
+  lc_render_models_settings.call(this, env, models_container);
   return container;
 }
 function render_if_available(component_key, env, container) {
@@ -18021,6 +18088,7 @@ var SmartEnv2 = class extends SmartEnv {
     if (!this._registered_ctx_menu_actions) {
       this._registered_ctx_menu_actions = true;
     }
+    lc_schedule_vault_compaction(this);
   }
   handle_env_load_attempt_after_loaded() {
     handle_env_load_attempt_after_loaded(this);
@@ -18035,10 +18103,24 @@ var SmartEnv2 = class extends SmartEnv {
     const previous_change = this._embedding_model_change_promise || Promise.resolve();
     const change_promise = previous_change.then(async () => {
       if (change_id !== this._embedding_model_change_id) return;
-      await Promise.all([
-        this.smart_sources?.embeddings?.load_vectors(),
-        this.smart_blocks?.embeddings?.load_vectors()
-      ]);
+      const collections = [this.smart_sources, this.smart_blocks].filter(Boolean);
+      // An embed run that the switch interrupted stops on its next batch; let it
+      // wind down before reading the new model's vectors and restarting.
+      await Promise.allSettled(collections.map((collection) => collection.entities_vector_adapter?._process_embed_queue_promise));
+      if (change_id !== this._embedding_model_change_id) return;
+      for (const collection of collections) {
+        try {
+          await collection.embeddings?.load_vectors();
+        } catch (error) {
+          console.warn(`[smart_env] Failed to load ${collection.collection_key} vectors after the model change`, error);
+          this.events?.emit("embedding:error", {
+            level: "warning",
+            message: `Could not read the ${collection.collection_key} vector file for the new model; its embeddings will be rebuilt.`,
+            details: error?.message || String(error || ""),
+            event_source: "handle_embedding_model_change"
+          });
+        }
+      }
       if (change_id !== this._embedding_model_change_id) return;
       this.smart_sources?.mark_embed_queue_dirty?.();
       this.smart_blocks?.mark_embed_queue_dirty?.();
@@ -18048,6 +18130,12 @@ var SmartEnv2 = class extends SmartEnv {
     }).catch((error) => {
       if (change_id !== this._embedding_model_change_id) return;
       console.warn("[smart_env] Failed to switch embedding model", error);
+      this.events?.emit("embedding:error", {
+        level: "error",
+        message: "Switching the embedding model did not finish; some notes may be unembedded. Use Re-index embeddings in Settings.",
+        details: error?.message || String(error || ""),
+        event_source: "handle_embedding_model_change"
+      });
     });
     this._embedding_model_change_promise = change_promise;
     return change_promise;
@@ -22401,6 +22489,11 @@ var ScEarlySettingsTab = class extends SmartPluginSettingsTab {
     super.hide?.();
     this.plugin_container?.empty?.();
     this.turn_off_listener?.();
+  }
+  async render_header(container) {
+    if (!container) return;
+    container.empty?.();
+    lc_render_settings_intro(container);
   }
   async render_plugin_settings(container) {
     if (!container) return;
@@ -29641,18 +29734,7 @@ function lc_update_local_model_profile(env, name, patch) {
   }
 }
 async function lc_use_local_model(env, name) {
-  lc_sync_local_transformers_models(env);
-  const key = LC_LOCAL_MODEL_PREFIX + name;
-  const models = env.embedding_models;
-  if (!models) throw new Error("Embedding models collection unavailable.");
-  let target = models.default;
-  if (!target || target.data?.provider_key !== "transformers") {
-    target = models.new_model({ provider_key: "transformers", model_key: key });
-    models.settings.default_model_key = target.key;
-  }
-  target.settings.model_key = key;
-  target.model_changed("model_key", key);
-  target.debounce_save();
+  return lc_use_model_key(env, LC_LOCAL_MODEL_PREFIX + name);
 }
 async function lc_remove_local_model(env, name) {
   if (!lc_valid_model_name(name)) throw new Error(`Invalid model name: ${name}`);
@@ -29667,6 +29749,11 @@ async function lc_remove_local_model(env, name) {
   const registry = lc_get_local_models_registry(env, true);
   delete registry[name];
   lc_sync_local_transformers_models(env);
+  try {
+    await lc_compact_vault_data(env);
+  } catch (error) {
+    console.warn("[Local Connections] vault data compaction after model removal failed", error);
+  }
 }
 function lc_debounce(fn, ms = 400) {
   let timer = null;
@@ -29710,7 +29797,369 @@ function lc_apply_connections_filters(connections_list, params) {
   return filter;
 }
 
+// --- vault data compaction ------------------------------------------------------
+// One vector file per model fingerprint lives under .smart-env/<collection>/. Files
+// for models that are no longer installed, references to them in the note records,
+// and data folders of collections that no longer exist are removed on load and
+// whenever a local model is removed, so the vault only carries what is in use.
+var LC_BUNDLED_MODEL_KEY = "Snowflake/snowflake-arctic-embed-xs";
+var LC_COMPACT_DELAY_MS = 20000;
+function lc_env_data_dir(env) {
+  return env?.data_fs_path || env?.data_fs?.fs_path || ".smart-env";
+}
+function lc_model_fingerprint_for_key(env, model_key) {
+  const profile = transformers_models[model_key];
+  if (!profile) return null;
+  const data = {
+    provider_key: "transformers",
+    model_key,
+    dimensions: profile.dims || "",
+    max_tokens: Number(profile.max_tokens || 0)
+  };
+  const space = profile.semantic_profile?.embedding_space_id;
+  if (space) data.embedding_space_id = space;
+  return `mf_${murmur_hash_32_alphanumeric(JSON.stringify(data))}`;
+}
+function lc_known_vector_files(env) {
+  lc_sync_local_transformers_models(env);
+  const keys = new Set([LC_BUNDLED_MODEL_KEY]);
+  const current = lc_current_model_key(env);
+  if (current) keys.add(current);
+  for (const name of Object.keys(lc_get_local_models_registry(env))) {
+    if (lc_valid_model_name(name)) keys.add(LC_LOCAL_MODEL_PREFIX + name);
+  }
+  const keep = new Set();
+  for (const key of keys) {
+    const fingerprint = lc_model_fingerprint_for_key(env, key);
+    if (fingerprint) keep.add(fingerprint);
+  }
+  for (const collection of [env?.smart_sources, env?.smart_blocks]) {
+    const active = collection?.embeddings?.active_file;
+    if (active) keep.add(active);
+  }
+  return keep;
+}
+async function lc_compact_vault_data(env) {
+  const adapter = lc_vault_adapter(env);
+  if (!adapter || !env?.smart_sources) return null;
+  const root = lc_env_data_dir(env);
+  const keep = lc_known_vector_files(env);
+  const summary = { removed_files: [], removed_dirs: [], cleared_refs: 0, saved_items: 0 };
+  const collections = [];
+  for (const collection of [env.smart_sources, env.smart_blocks]) {
+    if (collection?.embeddings?.data_dir && !collections.some((c) => c.embeddings.data_dir === collection.embeddings.data_dir)) collections.push(collection);
+  }
+  const removed = new Set();
+  for (const collection of collections) {
+    const dir = `${root}/${collection.embeddings.data_dir}`;
+    let listing = null;
+    try {
+      if (!await adapter.exists(dir)) continue;
+      listing = await adapter.list(dir);
+    } catch (error) {
+      continue;
+    }
+    for (const path of listing?.files || []) {
+      const name = path.split("/").pop();
+      if (!/^mf_[A-Za-z0-9]+$/.test(name) || keep.has(name)) continue;
+      try {
+        await adapter.remove(path);
+        removed.add(name);
+        summary.removed_files.push(`${collection.embeddings.data_dir}/${name}`);
+      } catch (error) {
+        console.warn("[Local Connections] could not remove vector file", path, error);
+      }
+    }
+  }
+  for (const collection of [env.smart_sources, env.smart_blocks].filter((c) => c?.embeddings?.data_dir)) {
+    const dir = `${root}/${collection.embeddings.data_dir}`;
+    const exists_cache = new Map();
+    const file_exists = async (file) => {
+      if (removed.has(file)) return false;
+      if (!exists_cache.has(file)) exists_cache.set(file, await adapter.exists(`${dir}/${file}`));
+      return exists_cache.get(file);
+    };
+    let changed = 0;
+    for (const item of Object.values(collection.items || {})) {
+      const embedding = item?.data?.embedding;
+      if (!embedding || typeof embedding !== "object") continue;
+      let item_changed = false;
+      for (const [type, refs] of Object.entries(embedding)) {
+        if (type === "history" || !refs || typeof refs !== "object" || Array.isArray(refs)) continue;
+        for (const [fingerprint, ref] of Object.entries(refs)) {
+          if (!ref || typeof ref !== "object" || !ref.file) continue;
+          if (await file_exists(ref.file)) continue;
+          delete refs[fingerprint];
+          summary.cleared_refs++;
+          item_changed = true;
+        }
+        if (!Object.keys(refs).length) delete embedding[type];
+      }
+      if (Array.isArray(embedding.history) && embedding.history.length) {
+        const next_history = [];
+        for (const entry of embedding.history) {
+          if (entry?.file && !await file_exists(entry.file)) {
+            summary.cleared_refs++;
+            item_changed = true;
+            continue;
+          }
+          next_history.push(entry);
+        }
+        embedding.history = next_history;
+      }
+      if (item_changed) {
+        item.queue_save?.();
+        changed++;
+      }
+    }
+    if (changed) {
+      summary.saved_items += changed;
+      try {
+        await collection.process_save_queue?.();
+      } catch (error) {
+        console.warn("[Local Connections] could not save records after compaction", error);
+      }
+    }
+  }
+  // Data folders of collections this build no longer has (event_logs, smart_contexts, …):
+  // removed when they hold nothing but collection records.
+  const known_dirs = new Set();
+  for (const key of Object.keys(env.config?.collections || {})) {
+    known_dirs.add(env[key]?.data_dir || env.config.collections[key]?.data_dir || key);
+  }
+  for (const collection of collections) known_dirs.add(collection.embeddings.data_dir);
+  try {
+    const listing = await adapter.list(root);
+    for (const path of listing?.folders || []) {
+      const name = path.split("/").pop();
+      if (!name || name.startsWith(".") || known_dirs.has(name)) continue;
+      const contents = await adapter.list(path);
+      const only_records = !(contents?.folders || []).length && (contents?.files || []).every((file) => file.endsWith(".ajson"));
+      if (!only_records) continue;
+      try {
+        await adapter.rmdir(path, true);
+        summary.removed_dirs.push(name);
+      } catch (error) {
+        console.warn("[Local Connections] could not remove stale data folder", path, error);
+      }
+    }
+  } catch (error) {
+    console.warn("[Local Connections] could not list the data folder", error);
+  }
+  if (summary.removed_files.length || summary.removed_dirs.length || summary.cleared_refs) {
+    console.log("[Local Connections] compacted vault data", summary);
+  }
+  return summary;
+}
+function lc_schedule_vault_compaction(env) {
+  if (!env || env._lc_compaction_scheduled) return;
+  env._lc_compaction_scheduled = true;
+  setTimeout(() => {
+    if (env.state !== "loaded") return;
+    lc_compact_vault_data(env).catch((error) => {
+      console.warn("[Local Connections] vault data compaction failed", error);
+    });
+  }, LC_COMPACT_DELAY_MS);
+}
+
 // --- settings UI ----------------------------------------------------------------
+var import_obsidian_lc_models = require("obsidian");
+// The plugin keeps exactly one embedding model configuration (upstream's
+// "default"); choosing a model re-points it. Configurations left over from
+// older versions are dropped when the models settings render.
+function lc_embedding_config(env) {
+  const models = env?.embedding_models;
+  if (!models) return null;
+  let config = models.default;
+  if (!config || config.data?.provider_key !== "transformers") {
+    config = models.new_model({ provider_key: "transformers" });
+    models.settings.default_model_key = config.key;
+  }
+  return config;
+}
+function lc_prune_embedding_configs(env) {
+  const models = env?.embedding_models;
+  if (!models) return 0;
+  const keep = lc_embedding_config(env);
+  let pruned = 0;
+  for (const item of models.filter((m) => !m.deleted && m !== keep)) {
+    item.delete();
+    pruned++;
+  }
+  if (pruned) models.process_save_queue?.();
+  return pruned;
+}
+function lc_current_model_key(env) {
+  return env?.embedding_models?.default?.data?.model_key || null;
+}
+function lc_use_model_key(env, key) {
+  lc_sync_local_transformers_models(env);
+  const config = lc_embedding_config(env);
+  if (!config) throw new Error("Embedding models collection unavailable.");
+  config.settings.model_key = key;
+  config.model_changed("model_key", key);
+  config.debounce_save();
+  return config;
+}
+// One row per usable model: the bundled model, every downloaded / added folder,
+// and (flagged) a selected public model whose files are not installed.
+function lc_model_rows(env) {
+  lc_sync_local_transformers_models(env);
+  const registry = lc_get_local_models_registry(env);
+  const current_key = lc_current_model_key(env);
+  const bundled = transformers_models[LC_BUNDLED_MODEL_KEY] || {};
+  const rows = [{
+    kind: "bundled",
+    key: LC_BUNDLED_MODEL_KEY,
+    name: bundled.name || "Snowflake Arctic Embed XS (bundled)",
+    details: [`${bundled.dims || 384} dim`, `${bundled.max_tokens || 512} max tokens`, "ships with the plugin, always available offline"].join(" · "),
+    profile: bundled.semantic_profile || {},
+    editable: false,
+    current: current_key === LC_BUNDLED_MODEL_KEY
+  }];
+  const names = Object.keys(registry).filter((n) => lc_valid_model_name(n) && registry[n] && typeof registry[n] === "object").sort((a, b) => a.localeCompare(b));
+  for (const name of names) {
+    const entry = registry[name];
+    const key = LC_LOCAL_MODEL_PREFIX + name;
+    const current = current_key === key || Boolean(entry.source_model_key && current_key === entry.source_model_key && lc_local_model_key_for_public(env, current_key) === key);
+    rows.push({
+      kind: "local",
+      key,
+      folder: name,
+      entry,
+      name: entry.name || name,
+      details: [
+        `${entry.dims} dim`,
+        `${entry.max_tokens} max tokens`,
+        entry.storage_dir === LC_DOWNLOADED_MODELS_DIR ? "downloaded" : "added from a folder",
+        entry.bytes ? lc_format_bytes(entry.bytes) : null,
+        `folder: ${name}`
+      ].filter(Boolean).join(" · "),
+      profile: {
+        pooling: entry.pooling === "cls" ? "cls" : "mean",
+        query_prefix: typeof entry.query_prefix === "string" ? entry.query_prefix : "",
+        document_prefix: typeof entry.document_prefix === "string" ? entry.document_prefix : ""
+      },
+      editable: true,
+      current
+    });
+  }
+  if (current_key && !rows.some((row) => row.current)) {
+    const profile = transformers_models[current_key];
+    rows.push({
+      kind: "missing",
+      key: current_key,
+      name: profile?.name || current_key,
+      details: "Selected, but its files are not installed: embedding fails until it is downloaded under Add local model or another model is chosen.",
+      profile: profile?.semantic_profile || {},
+      editable: false,
+      current: true,
+      missing: true
+    });
+  }
+  return rows.sort((a, b) => a.current === b.current ? 0 : a.current ? -1 : 1);
+}
+async function lc_test_model_row(env, row, result_el) {
+  const config = lc_embedding_config(env);
+  if (!config) throw new Error("Embedding models collection unavailable.");
+  result_el.setText("Testing… loading the model can take a moment.");
+  const temporary = config.data?.model_key !== row.key;
+  const item = temporary ? new config.constructor(env, { provider_key: "transformers", model_key: row.key }) : config;
+  try {
+    const result = await item.test_model();
+    if (result?.success) {
+      const dims = Array.isArray(result.response?.vec) ? result.response.vec.length : null;
+      result_el.setText(`Model works${dims ? `: ${dims}-dimension vector for the test input` : ""}.`);
+    } else {
+      result_el.setText(`Test failed: ${result?.error || result?.response?.error || "no embedding returned"}`);
+    }
+  } catch (error) {
+    result_el.setText(`Test failed: ${error?.message || error}`);
+  } finally {
+    if (temporary) {
+      try { item._instance?.unload?.(); } catch (_error) { }
+      item._instance = null;
+    }
+  }
+}
+var LcEmbeddingProfileModal = class extends import_obsidian_lc_models.Modal {
+  constructor(env, row, on_saved = null) {
+    super(lc_obsidian_app(env));
+    this.env = env;
+    this.row = row;
+    this.on_saved = on_saved;
+  }
+  onOpen() {
+    const { Setting } = import_obsidian_lc_models;
+    const row = this.row;
+    this.titleEl.setText(`Model settings: ${row.name}`);
+    const container = this.contentEl;
+    container.empty();
+    container.addClass("lc-model-profile-modal");
+    const intro = container.createDiv({ cls: "setting-item-description lc-model-profile-modal__intro" });
+    intro.createEl("p", { text: "Pooling is how the model’s per-word vectors are combined into one vector for a note: Mean averages them, CLS takes the special first token. Prefixes are fixed phrases some models expect in front of every search query (for example “query: ”) and every note (“passage: ”)." });
+    intro.createEl("p", { text: "Use whatever the model card says. Wrong values still produce vectors, but the connections get noticeably worse. Changing them while the model is in use rebuilds its embeddings." });
+    if (!row.editable) intro.createEl("p", { text: row.missing ? "These values are read from the model list and cannot be edited until the model is installed." : "These values are set by the model’s card and are fixed for the bundled model." });
+    const draft = {
+      pooling: row.profile.pooling === "cls" ? "cls" : "mean",
+      query_prefix: row.profile.query_prefix || "",
+      document_prefix: row.profile.document_prefix || ""
+    };
+    new Setting(container).setName("Pooling").setDesc("Mean for most sentence-transformers models; CLS for BGE, Arctic and Granite.").addDropdown((dd) => {
+      dd.addOption("mean", "Mean pooling");
+      dd.addOption("cls", "CLS pooling");
+      dd.setValue(draft.pooling);
+      dd.setDisabled(!row.editable);
+      dd.onChange((value) => { draft.pooling = value === "cls" ? "cls" : "mean"; });
+    });
+    new Setting(container).setName("Query prefix").setDesc("Put in front of every search query and the note used as the centre of the graph.").addText((text) => {
+      text.setPlaceholder("none");
+      text.setValue(draft.query_prefix);
+      text.setDisabled(!row.editable);
+      text.onChange((value) => { draft.query_prefix = value; });
+    });
+    new Setting(container).setName("Document prefix").setDesc("Put in front of every note before it is embedded.").addText((text) => {
+      text.setPlaceholder("none");
+      text.setValue(draft.document_prefix);
+      text.setDisabled(!row.editable);
+      text.onChange((value) => { draft.document_prefix = value; });
+    });
+    const buttons = new Setting(container);
+    buttons.addButton((btn) => {
+      btn.setButtonText(row.editable ? "Cancel" : "Close");
+      btn.onClick(() => this.close());
+    });
+    if (row.editable) {
+      buttons.addButton((btn) => {
+        btn.setButtonText("Save").setCta();
+        btn.onClick(async () => {
+          const changed = draft.pooling !== (row.profile.pooling || "mean") || draft.query_prefix !== (row.profile.query_prefix || "") || draft.document_prefix !== (row.profile.document_prefix || "");
+          if (changed) {
+            lc_update_local_model_profile(this.env, row.folder, { ...draft });
+            if (row.current) new import_obsidian_lc_models.Notice(`Model settings saved. Embeddings are being rebuilt with “${row.name}”.`);
+            else new import_obsidian_lc_models.Notice("Model settings saved.");
+          }
+          this.close();
+          if (typeof this.on_saved === "function") await this.on_saved();
+        });
+      });
+    }
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+function lc_render_settings_intro(container) {
+  const intro = container.createDiv({ cls: "lc-settings-intro" });
+  intro.createEl("h1", { text: "Local Connections" });
+  intro.createEl("p", {
+    cls: "lc-settings-intro__text",
+    text: "Finds the notes related to the one you are reading. Everything runs on this computer: nothing leaves your vault and no account is needed. Off by default on mobile. One side panel holds a semantic graph, a list and a search of your notes; \u2318-click (Ctrl-click on Windows and Linux) a note in the graph or list to add a link to it at your cursor. The vault graph opens a full view of all your notes, semantically connected and colour-coded by cluster."
+  });
+}
+function lc_local_models_subheading(parent, text) {
+  return parent.createEl("h4", { cls: "lc-local-models__subheading", text });
+}
 function lc_external_link(parent, text, href) {
   const a = parent.createEl("a", { text, href });
   a.addEventListener("click", (e) => {
@@ -29781,164 +30230,216 @@ function lc_render_local_models_help(section) {
   const p4 = body.createEl("p");
   p4.appendText("The files are copied into this vault at ");
   p4.createEl("code", { text: ".obsidian/plugins/local-connections/models/<model-name>/" });
-  p4.appendText(" (small models are 30\u2013130 MB and sync with the vault). Dimensions and maximum tokens are read from config.json; pooling and text prefixes are guessed from the folder (check the model card and adjust below: E5 models need \u201Cquery: \u201D / \u201Cpassage: \u201D, BGE and Arctic models use CLS pooling). The model is then listed as \u201C<model-name> (local files)\u201D in every embedding model\u2019s Model dropdown, and loads from these files only \u2014 nothing is downloaded for it. Press Use to make it the default embedding model; existing embeddings are rebuilt for the new model.");
+  p4.appendText(" (small models are 30\u2013130 MB and sync with the vault). Dimensions and maximum tokens are read from config.json; pooling and text prefixes are guessed from the folder (check the model card and adjust under the model\u2019s Settings button: E5 models need \u201Cquery: \u201D / \u201Cpassage: \u201D, BGE and Arctic models use CLS pooling). The model is then listed under Embedding models and loads from these files only \u2014 nothing is downloaded for it. Press Use to embed with it; existing embeddings are rebuilt for the new model.");
 }
-async function lc_render_local_models(env, parent) {
-  const { Setting, Notice } = require("obsidian");
-  const section = parent.createDiv({ cls: "lc-local-models" });
+function lc_settings_panel(parent, cls, title, description) {
+  const panel = parent.createDiv({ cls: `lc-settings-panel ${cls}` });
+  const heading = panel.createDiv({ cls: "lc-settings-panel__heading" });
+  heading.createEl("div", { cls: "lc-settings-panel__title", text: title });
+  if (description) heading.createEl("div", { cls: "setting-item-description", text: description });
+  return panel;
+}
+function lc_render_model_card(env, parent, row, rerender) {
+  const { Notice } = import_obsidian_lc_models;
+  const card = parent.createDiv({ cls: "lc-model-card" + (row.current ? " is-current" : "") + (row.missing ? " is-missing" : "") });
+  const title = card.createDiv({ cls: "lc-model-card__name" });
+  title.createEl("b", { text: row.name });
+  if (row.current) title.createSpan({ cls: "lc-local-model__badge", text: row.missing ? "current · not installed" : "current" });
+  card.createDiv({ cls: "lc-model-card__details setting-item-description", text: row.details });
+  const actions = card.createDiv({ cls: "lc-model-card__actions" });
+  const confirm = card.createDiv({ cls: "lc-model-card__confirm sc-inline-confirm-row" });
+  confirm.hidden = true;
+  const result = card.createDiv({ cls: "lc-model-card__result setting-item-description" });
+  const button = (text, cls, on_click) => {
+    const btn = actions.createEl("button", { text, cls: cls || "" });
+    btn.addEventListener("click", on_click);
+    return btn;
+  };
+  const show_confirm = (label, ok_text, ok_cls, action) => {
+    confirm.empty();
+    confirm.hidden = false;
+    actions.hidden = true;
+    confirm.createEl("span", { text: label });
+    const cancel = confirm.createEl("button", { text: "Cancel" });
+    const ok = confirm.createEl("button", { text: ok_text, cls: ok_cls });
+    cancel.addEventListener("click", () => {
+      confirm.hidden = true;
+      actions.hidden = false;
+    });
+    ok.addEventListener("click", async () => {
+      ok.disabled = true;
+      cancel.disabled = true;
+      try {
+        await action(ok);
+      } finally {
+        confirm.hidden = true;
+        actions.hidden = false;
+      }
+    });
+  };
+  if (row.current && !row.missing) {
+    button("Re-index embeddings", "", () => show_confirm(
+      "Delete the current embeddings and rebuild them from your notes? About a minute for a few hundred notes.",
+      "Delete and re-index",
+      "mod-warning",
+      async (ok) => {
+        ok.textContent = "Re-indexing…";
+        result.setText("Removing current embeddings and rebuilding from source files…");
+        try {
+          const summary = await env.smart_sources.reindex_embeddings();
+          result.setText(`Re-indexed embeddings from ${summary.sources_queued} source${summary.sources_queued === 1 ? "" : "s"}.`);
+          new Notice("Embedding re-index completed.");
+        } catch (error) {
+          const message = error?.message || String(error || "Embedding re-index failed.");
+          console.warn("[Local Connections] failed to re-index embeddings", error);
+          result.setText(message);
+          new Notice(message);
+        }
+      }
+    ));
+  }
+  if (!row.current) {
+    button("Use", "", () => show_confirm(
+      `Make “${row.name}” the embedding model? Existing embeddings are rebuilt with it (this can take a while for large vaults).`,
+      "Use this model",
+      "mod-cta",
+      async () => {
+        try {
+          lc_use_model_key(env, row.key);
+          new Notice(`Embedding model switched to “${row.name}”.`);
+        } catch (error) {
+          console.error("[Local Connections] could not switch embedding model", error);
+          new Notice(`Could not switch model: ${error?.message || error}`, 10000);
+        }
+        await rerender();
+      }
+    ));
+  }
+  if (!row.missing) {
+    button("Test", "", async (event) => {
+      const btn = event.currentTarget;
+      btn.disabled = true;
+      try {
+        await lc_test_model_row(env, row, result);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+  button("Settings", "", () => new LcEmbeddingProfileModal(env, row, rerender).open());
+  if (row.kind === "local") {
+    const remove = button("Remove", "", () => show_confirm(
+      `Remove the files for “${row.name}” (${row.folder}) from the plugin folder?`,
+      "Remove",
+      "mod-warning",
+      async () => {
+        try {
+          await lc_remove_local_model(env, row.folder);
+          new Notice(`Removed local model “${row.name}”.`);
+        } catch (error) {
+          console.error("[Local Connections] could not remove local model", error);
+          new Notice(`Could not remove model: ${error?.message || error}`, 10000);
+        }
+        await rerender();
+      }
+    ));
+    if (row.current) {
+      remove.disabled = true;
+      remove.title = "Switch to another model first";
+    }
+  }
+  return card;
+}
+function lc_render_embedding_models_group(env, parent, rerender) {
+  const panel = lc_settings_panel(parent, "lc-embedding-models", "Embedding models", "The model that turns your notes and searches into vectors. One is in use at a time; switching rebuilds every note’s embedding, about a minute for a few hundred notes.");
+  for (const row of lc_model_rows(env)) lc_render_model_card(env, panel, row, rerender);
+  return panel;
+}
+function lc_render_add_local_model_group(env, parent, rerender) {
+  const { Setting, Notice } = import_obsidian_lc_models;
+  const panel = lc_settings_panel(parent, "lc-local-models", "Add local model", "Add an AI model, they will run locally once downloaded and installed. New models appear under Embedding models.");
+  lc_render_local_models_help(panel);
+
+  lc_local_models_subheading(panel, "Automatically download and install supported model");
+  let selected_download_model = Object.keys(LC_DOWNLOAD_MODELS)[0];
+  const download_row = new Setting(panel).setName("Supported model").setDesc("Downloaded once from Hugging Face, checked against its checksums and stored in the plugin folder. Runs offline afterwards.");
+  download_row.settingEl.addClass("lc-local-models__row");
+  download_row.addDropdown((dd) => {
+    for (const [model_id] of Object.entries(LC_DOWNLOAD_MODELS)) dd.addOption(model_id, lc_download_model_label(model_id));
+    dd.setValue(selected_download_model);
+    dd.onChange((value) => { if (LC_DOWNLOAD_MODELS[value]) selected_download_model = value; });
+  });
+  download_row.addButton((btn) => {
+    btn.setButtonText("Download and install…");
+    btn.onClick(async () => {
+      const model_id = selected_download_model;
+      if (!Object.prototype.hasOwnProperty.call(LC_DOWNLOAD_MODELS, model_id)) {
+        new Notice("Unsupported model. Choose a model from the supported download list.", 10000);
+        return;
+      }
+      const notice = new Notice(`Downloading ${model_id}…`, 0);
+      try {
+        const result = await lc_download_supported_model(env, model_id, (msg) => notice.setMessage(msg));
+        notice.hide();
+        new Notice(`Installed ${model_id} (${lc_format_bytes(result.bytes)}). Press Use under Embedding models to embed with it (close and reopen Settings if it is not listed).`, 12000);
+      } catch (error) {
+        notice.hide();
+        console.error("[Local Connections] supported model download failed", error);
+        new Notice(`Could not download model: ${error?.message || error}`, 12000);
+      }
+      await rerender();
+    });
+  });
+
+  lc_local_models_subheading(panel, "Manually add model");
+  const file_input = panel.createEl("input", { type: "file", attr: { multiple: "", webkitdirectory: "", directory: "" } });
+  file_input.style.display = "none";
+  const add_row = new Setting(panel).setName("Model folder").setDesc("Copy a Transformers.js (ONNX) model folder from this computer into the plugin folder. “Where to get a model” above lists the required files.");
+  add_row.settingEl.addClass("lc-local-models__row");
+  add_row.addButton((btn) => {
+    btn.setButtonText("Add model folder…").setCta();
+    btn.onClick(() => file_input.click());
+  });
+  file_input.addEventListener("change", async () => {
+    const files = file_input.files;
+    if (!files?.length) return;
+    const status = panel.createDiv({ cls: "lc-local-models__status setting-item-description" });
+    const notice = new Notice("Adding local model…", 0);
+    try {
+      const results = await lc_import_model_files(env, files, (msg) => {
+        notice.setMessage(msg);
+        status.setText(msg);
+      });
+      notice.hide();
+      const ok = results.filter((r) => r.name);
+      const failed = results.filter((r) => r.error);
+      if (ok.length) {
+        const total = ok.reduce((s, r) => s + (r.bytes || 0), 0);
+        new Notice(`Added ${ok.map((r) => r.name).join(", ")} (${lc_format_bytes(total)}). Press Use under Embedding models to embed with it (close and reopen Settings if it is not listed).`, 10000);
+      }
+      failed.forEach((r) => new Notice(`Skipped ${r.root}: ${r.error}`, 12000));
+    } catch (error) {
+      notice.hide();
+      console.error("[Local Connections] adding local model failed", error);
+      new Notice(`Could not add model: ${error?.message || error}`, 12000);
+    }
+    await rerender();
+  });
+  return panel;
+}
+async function lc_render_models_settings(env, parent) {
+  const section = parent.createDiv({ cls: "lc-models-settings" });
   let disposed = false;
   const render = async () => {
     if (disposed) return;
     section.empty();
-    lc_sync_local_transformers_models(env);
-    const registry = lc_get_local_models_registry(env);
-    const names = Object.keys(registry).filter((n) => lc_valid_model_name(n) && registry[n] && typeof registry[n] === "object").sort((a, b) => a.localeCompare(b));
-
-    const heading = new Setting(section).setName("Local embedding model files").setHeading();
-    heading.setDesc("Use an embedding model from files on this computer. Runs fully offline.");
-    const file_input = section.createEl("input", { type: "file", attr: { multiple: "", webkitdirectory: "", directory: "" } });
-    file_input.style.display = "none";
-    heading.addButton((btn) => {
-      btn.setButtonText("Add model folder\u2026").setCta();
-      btn.onClick(() => file_input.click());
-    });
-    let selected_download_model = Object.keys(LC_DOWNLOAD_MODELS)[0];
-    heading.addDropdown((dd) => {
-      for (const [model_id] of Object.entries(LC_DOWNLOAD_MODELS)) dd.addOption(model_id, lc_download_model_label(model_id));
-      dd.setValue(selected_download_model);
-      dd.onChange((value) => { if (LC_DOWNLOAD_MODELS[value]) selected_download_model = value; });
-    });
-    heading.addButton((btn) => {
-      btn.setButtonText("Download supported model\u2026");
-      btn.onClick(async () => {
-        const model_id = selected_download_model;
-        if (!Object.prototype.hasOwnProperty.call(LC_DOWNLOAD_MODELS, model_id)) {
-          new Notice("Unsupported model. Choose a model from the supported download list.", 10000);
-          return;
-        }
-        const notice = new Notice(`Downloading ${model_id}\u2026`, 0);
-        try {
-          const result = await lc_download_supported_model(env, model_id, (msg) => notice.setMessage(msg));
-          notice.hide();
-          new Notice(`Installed ${model_id} (${lc_format_bytes(result.bytes)}). Choose it in Embedding \u2192 Model.`, 10000);
-        } catch (error) {
-          notice.hide();
-          console.error("[Local Connections] supported model download failed", error);
-          new Notice(`Could not download model: ${error?.message || error}`, 12000);
-        }
-        await render();
-      });
-    });
-    file_input.addEventListener("change", async () => {
-      const files = file_input.files;
-      if (!files?.length) return;
-      const status = section.createDiv({ cls: "lc-local-models__status setting-item-description" });
-      const notice = new Notice("Adding local model\u2026", 0);
-      try {
-        const results = await lc_import_model_files(env, files, (msg) => {
-          notice.setMessage(msg);
-          status.setText(msg);
-        });
-        notice.hide();
-        const ok = results.filter((r) => r.name);
-        const failed = results.filter((r) => r.error);
-        if (ok.length) {
-          const total = ok.reduce((s, r) => s + (r.bytes || 0), 0);
-          new Notice(`Added ${ok.map((r) => r.name).join(", ")} (${lc_format_bytes(total)}). Press \u201CUse\u201D to embed with it.`, 8000);
-        }
-        failed.forEach((r) => new Notice(`Skipped ${r.root}: ${r.error}`, 12000));
-      } catch (error) {
-        notice.hide();
-        console.error("[Local Connections] adding local model failed", error);
-        new Notice(`Could not add model: ${error?.message || error}`, 12000);
-      }
-      await render();
-    });
-
-    lc_render_local_models_help(section);
-
-    if (!names.length) {
-      new Setting(section).setName("No local model folders yet").setDesc("Use \u201CAdd model folder\u2026\u201D to copy one into the plugin folder.");
+    try {
+      lc_prune_embedding_configs(env);
+    } catch (error) {
+      console.warn("[Local Connections] could not tidy embedding model configurations", error);
     }
-    const default_key = env.embedding_models?.default?.data?.model_key;
-    for (const name of names) {
-      const entry = registry[name];
-      const key = LC_LOCAL_MODEL_PREFIX + name;
-      const is_default = default_key === key;
-      const used_by = lc_models_using(env, key).length;
-      const details = [
-        `${entry.dims} dim`,
-        `${entry.max_tokens} max tokens`,
-        (entry.onnx_files || []).length ? `onnx: ${(entry.onnx_files || []).join(", ")}` : "no onnx files",
-        entry.bytes ? lc_format_bytes(entry.bytes) : null
-      ].filter(Boolean).join(" \u00B7 ");
-      const row = new Setting(section).setName(name).setDesc(details);
-      row.settingEl.addClass("lc-local-model");
-      if (is_default) row.nameEl.createSpan({ cls: "lc-local-model__badge", text: "current" });
-      else if (used_by) row.nameEl.createSpan({ cls: "lc-local-model__badge", text: "configured" });
-
-      const confirm = section.createDiv({ cls: "lc-local-model__confirm sc-inline-confirm-row" });
-      confirm.style.display = "none";
-      const show_confirm = (kind) => {
-        confirm.empty();
-        confirm.style.display = "";
-        const label = kind === "use" ? `Make \u201C${name}\u201D the default embedding model? Existing embeddings will be rebuilt with it (this can take a while for large vaults).` : `Remove the files for \u201C${name}\u201D from the plugin folder?`;
-        confirm.createEl("span", { text: label });
-        const cancel = confirm.createEl("button", { text: "Cancel" });
-        const ok = confirm.createEl("button", { text: kind === "use" ? "Use this model" : "Remove", cls: kind === "use" ? "mod-cta" : "mod-warning" });
-        cancel.addEventListener("click", () => { confirm.style.display = "none"; });
-        ok.addEventListener("click", async () => {
-          ok.disabled = true;
-          cancel.disabled = true;
-          try {
-            if (kind === "use") {
-              await lc_use_local_model(env, name);
-              new Notice(`Embedding model switched to \u201C${name}\u201D.`);
-            } else {
-              await lc_remove_local_model(env, name);
-              new Notice(`Removed local model \u201C${name}\u201D.`);
-            }
-          } catch (error) {
-            console.error("[Local Connections] local model action failed", error);
-            new Notice(`${kind === "use" ? "Could not switch model" : "Could not remove model"}: ${error?.message || error}`, 10000);
-          }
-          await render();
-        });
-      };
-      row.addButton((btn) => {
-        btn.setButtonText(is_default ? "In use" : "Use");
-        btn.setDisabled(is_default);
-        btn.onClick(() => show_confirm("use"));
-      });
-      row.addExtraButton((btn) => {
-        btn.setIcon("trash");
-        btn.setTooltip(used_by ? "Remove (switch to another model first)" : "Remove model files");
-        btn.setDisabled(Boolean(used_by));
-        btn.onClick(() => { if (!used_by) show_confirm("remove"); });
-      });
-
-      const profile = new Setting(section).setName("Embedding profile").setDesc("Pooling and the text prefixes the model card asks for. Changing these while the model is in use rebuilds its embeddings." + (entry.source_model_key ? " These edits apply only when the (local files) entry is selected; the original model selection keeps its standard profile." : ""));
-      profile.settingEl.addClass("lc-local-model__profile");
-      const update_entry = (patch) => lc_update_local_model_profile(env, name, patch);
-      profile.addDropdown((dd) => {
-        dd.addOption("mean", "Mean pooling");
-        dd.addOption("cls", "CLS pooling");
-        dd.setValue(entry.pooling === "cls" ? "cls" : "mean");
-        dd.onChange((value) => update_entry({ pooling: value }));
-      });
-      profile.addText((text) => {
-        text.setPlaceholder("Query prefix");
-        text.setValue(entry.query_prefix || "");
-        text.inputEl.setAttribute("aria-label", "Query prefix");
-        text.onChange(lc_debounce((value) => update_entry({ query_prefix: value })));
-      });
-      profile.addText((text) => {
-        text.setPlaceholder("Document prefix");
-        text.setValue(entry.document_prefix || "");
-        text.inputEl.setAttribute("aria-label", "Document prefix");
-        text.onChange(lc_debounce((value) => update_entry({ document_prefix: value })));
-      });
-    }
+    lc_render_embedding_models_group(env, section, render);
+    lc_render_add_local_model_group(env, section, render);
   };
   await render();
   const off = env.embedding_models?.on_event?.("model:changed", () => { render(); });
