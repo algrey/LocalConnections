@@ -28,13 +28,6 @@ especially after a debugging session against a real vault:
   commit — the old blob is still in history. Rewrite history
   (`git filter-repo` or BFG) to remove it.
 
-(This note exists because a leaked OpenAI API key was found in a Smart
-Connections `data.json` in this user's vault — outside this repo, but a
-reminder of what "vault data" can contain. Secrets specifically are unlikely
-here since this is local-first and most credentials never leave the vault,
-plus GitHub's own push protection flags obvious ones — but vault content like
-embeddings has no such safety net.)
-
 ## The loop
 
 ```bash
