@@ -1,5 +1,5 @@
 // Synthetic download/install contract tests. No vault or network is used.
-load("/Users/alex/Documents/dev/LocalConnections/tools/smoke_test.js");
+load("tools/smoke_test.js");
 var console = { log: function () {}, warn: function () {}, error: function () {} };
 function assert(value, message) { if (!value) throw new Error("OFFLINE DOWNLOAD TEST FAIL: " + message); }
 async function rejects(fn, message) {
@@ -29,7 +29,7 @@ fetch = async function (url, options) {
   fetch_calls.push(String(url));
   assert(options.credentials === "omit" && options.referrerPolicy === "no-referrer", "downloads omit credentials and referrer");
   var rel = String(url).split("/resolve/")[1].split("?")[0].split("/").slice(1).join("/");
-  if (network_mode === "missing") return { ok: false, status: 404 };
+  if (network_mode === "missing" || network_mode === "missing-pinned-file" && rel === "vocab.txt") return { ok: false, status: 404 };
   var data = fixture[rel], read = false;
   return { ok: true, headers: { get: function () { return network_mode === "headerless-overflow" ? null : String(data.byteLength + (network_mode === "large-header" ? 1 : 0)); } },
     arrayBuffer: async function () { throw new Error("unbounded response allocation must never be used"); },
@@ -137,6 +137,13 @@ var finished = false, failure = null;
   assert(!adapter.writes.length, "checksum failure prevents installation"); digest_wrong = false;
   network_mode = "missing";
   await rejects(function () { return lc_download_supported_model(env, model_id); }, "missing"); network_mode = "normal";
+  test_spec.files["vocab.txt"] = [1, zero_hash];
+  network_mode = "missing-pinned-file";
+  var request_start = fetch_calls.length;
+  await rejects(function () { return lc_download_supported_model(env, model_id); }, "missing vocab.txt");
+  assert(!adapter.writes.length && !fetch_calls.slice(request_start).some(function (url) { return url.includes(".onnx"); }), "an incomplete pinned download stops before fetching weights or writing files");
+  delete test_spec.files["vocab.txt"];
+  network_mode = "normal";
   var before = fetch_calls.length;
   await rejects(function () { return lc_fetch_allowed_model_file(model_id, "main", "config.json"); }, "manifest");
   await rejects(function () { return lc_fetch_allowed_model_file(model_id, test_spec.revision, "../config.json"); }, "manifest");

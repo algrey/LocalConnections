@@ -1,5 +1,5 @@
 // Security/privacy boundaries and graph lifecycle, using synthetic data only.
-load("/Users/alex/Documents/dev/LocalConnections/tools/smoke_test.js");
+load("tools/smoke_test.js");
 var console = { log: function () {}, warn: function () {}, error: function () {} };
 var setTimeout = function () { return 1; };
 var clearTimeout = function () {};
@@ -12,6 +12,17 @@ function assert(value, message) {
 var finished = false;
 var failure = null;
 (async function () {
+  var native_reads = [];
+  var base = "https://fixture.invalid/runtime/";
+  var worker_source = lc_prepare_transformers_worker_source(base + "transformers-4.2.0.js", base);
+  var worker_fetch = new Function("globalThis", "self", "Response", worker_source + "\nreturn lc_fetch;")(
+    { fetch: async function (url) { native_reads.push(url); return { status: 200 }; } },
+    { addEventListener: function () {} },
+    function (_, options) { this.status = options.status; }
+  );
+  assert((await worker_fetch(base + "ort-wasm-simd-threaded.wasm")).status === 200, "bundled backend fetch permitted");
+  assert((await worker_fetch(base + "other.wasm")).status === 404 && native_reads.length === 1, "unlisted resource rejected before native fetch");
+
   var payload = '<img src="https://invalid.example/pixel" onerror="alert(1)">';
   var html = build_html7({ display_name: payload, data: { provider_key: payload, model_key: payload } }, {});
   assert(!html.includes(payload) && html.includes("&lt;img"), "model metadata is escaped");
@@ -35,6 +46,9 @@ var failure = null;
   entry.onnx_files = ["model_q8.onnx"];
   assert(lc_resolve_onnx_fallback(entry, "onnx/model.onnx_data") === "onnx/model_q8.onnx_data", "external data suffix preserved");
   assert(lc_resolve_onnx_fallback(entry, "onnx/model.onnx.data") === "onnx/model_q8.onnx.data", "dot data suffix preserved");
+  assert(lc_should_copy_model_file("onnx/model_q8.onnx_data_2"), "numbered ONNX sidecar included in folder imports");
+  assert(!lc_should_copy_model_file("onnx/other\\part.onnx"), "folder import requires portable model file names");
+  assert(lc_resolve_onnx_fallback(entry, "onnx/model.onnx_data_2") === "onnx/model_q8.onnx_data_2", "numbered sidecar preserved across precision fallback");
   assert((await lc_read_local_model_file(env, "demo/onnx/model.onnx_data")).byteLength === 4, "valid fallback reads model data");
 
   var read = false;

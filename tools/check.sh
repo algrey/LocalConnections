@@ -24,6 +24,7 @@ if [ ! -x "$JSC" ]; then
   exit 1
 fi
 
+cd "$DIR/.." || exit 1
 fail=0
 for t in smoke_test search_logic_test blocks_logic_test unembedded_notice_test vault_graph_logic_test review_regression_test offline_download_test model_load_test settings_models_test embed_switch_test vault_compact_test; do
   printf '%-24s ' "$t"

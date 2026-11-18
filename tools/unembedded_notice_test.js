@@ -1,4 +1,4 @@
-load("/Users/alex/Documents/dev/LocalConnections/tools/smoke_test.js");
+load("tools/smoke_test.js");
 function assert(c, m) { if (!c) throw new Error("ASSERT FAIL: " + m); }
 var env = { settings: { smart_sources: { min_chars: 200 } } };
 var tiny = { env: env, size: 134, should_embed: false, vec: undefined };

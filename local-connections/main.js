@@ -7683,6 +7683,9 @@ var smart_source_default = {
 
 // node_modules/obsidian-smart-env/src/utils/embedding_item.js
 var DEFAULT_EMBEDDING_TYPE = "default";
+function lc_is_vector_filename(file) {
+  return typeof file === "string" && /^mf_[A-Za-z0-9]+$/.test(file);
+}
 function ensure_embedding_data(item) {
   if (!item.data) item.data = {};
   if (!item.data.embedding) item.data.embedding = {};
@@ -8252,6 +8255,7 @@ var Embeddings = class _Embeddings {
     };
   }
   get_file_path(file = this.active_file) {
+    if (!lc_is_vector_filename(file)) throw new Error("Invalid vector file name");
     return `${this.data_dir}/${file}`;
   }
   /**
@@ -8365,7 +8369,7 @@ var Embeddings = class _Embeddings {
       }
       let ref = this.get_item_embedding_ref(item, type, model_fingerprint);
       let vector_changed = false;
-      if (ref?.file && ref.file !== active_file && ref.read_hash === item.read_hash && expected_dims) {
+      if (lc_is_vector_filename(ref?.file) && ref.file !== active_file && ref.read_hash === item.read_hash && expected_dims) {
         await this.load_vectors(ref.file, expected_dims);
         if (this._dims_by_file[ref.file] === expected_dims && this.get_vector_value_count(ref.file) % expected_dims === 0) {
           const legacy_vec = this.get_vector(ref.file, ref.file_i);
@@ -13162,14 +13166,21 @@ var TransformersWorkerEmbeddingModelAdapter = class extends SmartEmbedMessageAda
     });
   }
   get load_key() {
+    const model_key = this.model.model_key;
+    const profile = model_key?.startsWith(LC_LOCAL_MODEL_PREFIX)
+      ? lc_get_local_models_registry(this.model.env)[model_key.slice(LC_LOCAL_MODEL_PREFIX.length)]
+      : null;
+    const config = profile
+      ? lc_local_model_entry_to_profile(model_key.slice(LC_LOCAL_MODEL_PREFIX.length), profile)
+      : transformers_models[model_key];
     return JSON.stringify({
-      model_key: this.model.model_key,
-      revision: this.revision,
+      model_key,
+      revision: config?.revision,
       max_tokens: Number(this.model?.data?.max_tokens) || 512,
       batch_size: this.configured_batch_size,
       use_gpu: this.use_gpu !== false,
-      dtype: this.dtype,
-      semantic_profile: this.semantic_profile
+      dtype: config?.dtype || "auto",
+      semantic_profile: config?.semantic_profile
     });
   }
   /**
@@ -13190,7 +13201,7 @@ var TransformersWorkerEmbeddingModelAdapter = class extends SmartEmbedMessageAda
       },
       (error) => {
         if (error?.message !== "Message adapter unloaded") {
-          this._last_load_failure = { details: error?.message || String(error || ""), at: Date.now() };
+          this._last_load_failure = { key: load_key, details: error?.message || String(error || ""), at: Date.now() };
         }
         throw error;
       }
@@ -13253,12 +13264,14 @@ var TransformersWorkerEmbeddingModelAdapter = class extends SmartEmbedMessageAda
         this.state = "unloaded";
         this.reset_model_state();
       }
-      const profile = this.models[this.model.model_key] || {};
       const detail = error?.message || String(error);
+      if (detail === "Message adapter unloaded") throw error;
+      const profile = this.models[this.model.model_key] || {};
       if (profile.lc_bundle && /not found|missing|local_files_only|unavailable/i.test(detail)) {
         throw new Error("Bundled Arctic model files are incomplete. Reinstall Local Connections to restore its offline assets.");
       }
-      if (!profile.lc_bundle && !profile.lc_local && !String(this.model.model_key || "").startsWith(LC_LOCAL_MODEL_PREFIX)) {
+      if (!profile.lc_bundle && !profile.lc_local && !String(this.model.model_key || "").startsWith(LC_LOCAL_MODEL_PREFIX)
+          && !lc_local_model_key_for_public(this.model.env, this.model.model_key)) {
         throw new Error(`Model “${this.model.model_key}” is not installed locally. Use Settings → Local Connections → Add a local model → Download and install… first.`);
       }
       throw error;
@@ -13293,9 +13306,10 @@ var TransformersWorkerEmbeddingModelAdapter = class extends SmartEmbedMessageAda
    * @returns {Promise<void>}
    */
   async ensure_loaded() {
-    if (this.worker && this.state === "loaded" && this._load_key === this.load_key) return;
+    const key = this.load_key;
+    if (this.worker && this.state === "loaded" && this._load_key === key) return;
     const failure = this._last_load_failure;
-    if (failure && !this._load_promise && Date.now() - failure.at < 1e4) {
+    if (failure?.key === key && !this._load_promise && Date.now() - failure.at < 1e4) {
       throw new Error(failure.details);
     }
     await this.load();
@@ -14656,9 +14670,8 @@ var EmbeddingModel = class extends Model {
     try {
       // Load (or retry a failed load) first so a load error reports its real
       // cause instead of a generic "worker not loaded" from the message bridge.
-      if (typeof this.instance?.load === "function") await this.instance.load();
-      const resp = await this.embed("test input");
-      const success = resp && !resp?.error;
+      const resp = await lc_probe_embedding(this.instance);
+      const success = Boolean(resp?.vec?.length && !resp.error);
       this.data.test_passed = success;
       this.debounce_save();
       return { success, response: resp };
@@ -29232,7 +29245,11 @@ async function lc_fetch_allowed_model_file(model_id, revision, rel_path) {
   const [org, repo] = model_id.split("/");
   const url = `https://huggingface.co/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/resolve/${encodeURIComponent(spec.revision)}/${rel_path}?download=true`;
   const response = await fetch(url, { cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer" });
-  if (!response.ok) return null;
+  if (!response.ok) {
+    await response.body?.cancel();
+    if (response.status === 404) throw new Error(`Model is missing ${rel_path}`);
+    throw new Error(`Download failed for ${rel_path} (HTTP ${response.status})`);
+  }
   const size = Number(response.headers.get("content-length"));
   if (Number.isFinite(size) && size > expected[0]) {
     await response.body?.cancel();
@@ -29283,34 +29300,27 @@ async function lc_download_supported_model(env, model_id, report = null) {
   }
 }
 async function lc_install_supported_model(env, model_id, report) {
+  if (!Object.prototype.hasOwnProperty.call(LC_DOWNLOAD_MODELS, model_id)) throw new Error("Choose a model from the supported download list.");
   const spec = LC_DOWNLOAD_MODELS[model_id];
-  if (!spec) throw new Error("Choose a model from the supported download list.");
   const revision = spec.revision;
   if (Object.values(spec.files).reduce((sum, file) => sum + file[0], 0) > LC_MAX_IMPORT_BYTES) throw new Error("Model exceeds the supported download size limit.");
-  const files = Object.keys(spec.files || {}).filter((rel) => rel !== spec.onnx_file && rel !== "LICENSE");
+  const files = Object.keys(spec.files).filter((rel) => rel !== spec.onnx_file);
   const fetched = new Map();
   for (const rel of files) {
     if (typeof report === "function") report(`Downloading ${model_id}/${rel}…`);
     const file = await lc_fetch_allowed_model_file(model_id, revision, rel);
-    if (file) fetched.set(rel, file);
+    fetched.set(rel, file);
   }
   const config = lc_parse_download_json(fetched.get("config.json"), "config.json");
   const tokenizer_config = lc_parse_download_json(fetched.get("tokenizer_config.json"), "tokenizer_config.json");
-  let onnx = null;
-  if (typeof report === "function") report(`Downloading ${model_id}/${spec.onnx_file}…`);
-  onnx = await lc_fetch_allowed_model_file(model_id, revision, spec.onnx_file);
-  if (onnx) fetched.set(spec.onnx_file, onnx);
-  const missing = ["config.json", "tokenizer.json", "tokenizer_config.json"] .filter((rel) => !fetched.has(rel));
-  if (!onnx) missing.push("onnx/model_quantized.onnx (or another supported precision)");
-  if (missing.length) throw new Error(`Model is missing ${missing.join(", ")}`);
   const adapter = lc_vault_adapter(env);
   if (!adapter) throw new Error("Vault adapter unavailable.");
-  const dims = config && typeof config === "object" && !Array.isArray(config)
-    ? Number(config.hidden_size || config.d_model || config.dim || config.n_embd || config.embedding_size)
-    : NaN;
-  if (!config || typeof config !== "object" || Array.isArray(config) || !Number.isFinite(dims) || dims < 1 || dims > 65536) {
+  const dims = Number(config.hidden_size || config.d_model || config.dim || config.n_embd || config.embedding_size);
+  if (!Number.isSafeInteger(dims) || dims < 1 || dims > 65536) {
     throw new Error("Downloaded config.json is not a valid encoder configuration.");
   }
+  if (typeof report === "function") report(`Downloading ${model_id}/${spec.onnx_file}…`);
+  fetched.set(spec.onnx_file, await lc_fetch_allowed_model_file(model_id, revision, spec.onnx_file));
   const planned = Array.from(fetched.values()).reduce((sum, file) => sum + file.buffer.byteLength, 0);
   if (planned > LC_MAX_IMPORT_BYTES) throw new Error(`${lc_format_bytes(planned)} exceeds the ${lc_format_bytes(LC_MAX_IMPORT_BYTES)} limit`);
   const registry = lc_get_local_models_registry(env, true);
@@ -29386,9 +29396,12 @@ function lc_transformers_runtime_urls(env) {
 function lc_prepare_transformers_worker_source(runtime_url, asset_base) {
   if (!runtime_url || !asset_base) throw new Error("Bundled Transformers.js runtime assets are unavailable.");
   const needle = "const transformers_v4_url = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0';";
-  const replacement = `const transformers_v4_url = ${JSON.stringify(runtime_url)};\nconst __lc_runtime_asset_base = ${JSON.stringify(asset_base)};`;
+  const replacement = `const transformers_v4_url = ${JSON.stringify(runtime_url)};
+const __lc_runtime_asset_base = ${JSON.stringify(asset_base)};
+const lc_backend_urls = new Set(["", ".asyncify", ".jsep"].flatMap(variant =>
+  ["mjs", "wasm"].map(ext => __lc_runtime_asset_base + "ort-wasm-simd-threaded" + variant + "." + ext)));`;
   if (!transformers_v4_worker_default.includes(needle)) throw new Error("Pinned Transformers.js worker source is incompatible.");
-  return transformers_v4_worker_default.replace(needle, replacement).replace(
+  return transformers_v4_worker_default.replace(needle, () => replacement).replace(
     "const LC_LOCAL_MODEL_PATH = 'lc-local://models/';",
     "const LC_LOCAL_MODEL_PATH = 'lc-local://models/';\nconst LC_BUNDLED_MODEL_PATH = 'lc-bundled://models/';"
   ).replace(
@@ -29408,7 +29421,12 @@ function lc_prepare_transformers_worker_source(runtime_url, asset_base) {
     "return { path, bundle };\n}\n\nasync function lc_fetch(url, init) {"
   ).replace(
     "const rel_path = lc_local_rel_path(url);\n  if (rel_path === null) return lc_native_fetch(url, init);\n  const buffer = await lc_request_file(rel_path);",
-    "const request = lc_local_rel_path(url);\n  if (request === null) return lc_native_fetch(url, init);\n  const buffer = await lc_request_file(request.path, request.bundle);"
+    `const request = lc_local_rel_path(url);
+  if (request === null) {
+    if (lc_backend_urls.has(url?.url || String(url))) return lc_native_fetch(url, init);
+    return new Response(null, { status: 404 });
+  }
+  const buffer = await lc_request_file(request.path, request.bundle);`
   ).replace(
     "function lc_configure_env(env, is_local) {\n  if (is_local) {",
     "function lc_configure_env(env, is_local, is_bundle) {\n  if (is_local) {"
@@ -29500,7 +29518,7 @@ function lc_downloaded_models_base_dir(env) {
   return `${lc_plugin_dir(env)}/${LC_DOWNLOADED_MODELS_DIR}`;
 }
 function lc_resolve_onnx_fallback(entry, file_rel) {
-  const match = /^onnx\/(model[^/]*?)\.onnx(_data|\.data)?$/.exec(file_rel);
+  const match = /^onnx\/(model[^/]*?)\.onnx(_data(?:_[0-9]+)?|\.data)?$/.exec(file_rel);
   if (!match) return null;
   const ext = match[2] || "";
   const available = Array.isArray(entry.onnx_files)
@@ -29576,8 +29594,8 @@ function lc_valid_model_name(name) {
   return typeof name === "string" && name.length > 0 && name === lc_sanitize_model_name(name);
 }
 function lc_should_copy_model_file(rel) {
-  if (/^[^/]+\.json$/.test(rel)) return true;
-  if (/^onnx\/[^/]+\.onnx(_data|\.data)?$/.test(rel)) return true;
+  if (/^[A-Za-z0-9_-][A-Za-z0-9._-]*\.json$/.test(rel)) return true;
+  if (/^onnx\/[A-Za-z0-9_-][A-Za-z0-9._-]*\.onnx(_data(?:_[0-9]+)?|\.data)?$/.test(rel)) return true;
   if (rel === "1_Pooling/config.json") return true;
   return false;
 }
@@ -29653,7 +29671,7 @@ async function lc_import_model_files(env, file_list, report = null) {
     const rel_of = (f) => path_of(f).slice(root.length + 1);
     const model_files = files.filter((f) => path_of(f).startsWith(root + "/"));
     const has = (rel) => by_path.has(`${root}/${rel}`);
-    const onnx_files = model_files.map(rel_of).filter((r) => /^onnx\/[^/]+\.onnx$/.test(r)).map((r) => r.slice("onnx/".length)).sort();
+    const onnx_files = model_files.map(rel_of).filter((r) => r.endsWith(".onnx") && lc_should_copy_model_file(r)).map((r) => r.slice("onnx/".length)).sort();
     const missing = ["tokenizer.json", "tokenizer_config.json"].filter((r) => !has(r));
     if (!onnx_files.length) missing.push("onnx/*.onnx");
     if (missing.length) {
@@ -29672,9 +29690,14 @@ async function lc_import_model_files(env, file_list, report = null) {
       continue;
     }
     const name = lc_sanitize_model_name(root.split("/").pop());
+    const registry = lc_get_local_models_registry(env, true);
+    if (registry[name]?.storage_dir === LC_DOWNLOADED_MODELS_DIR) {
+      results.push({ root, error: "A downloaded model uses this name. Rename the import folder and try again." });
+      continue;
+    }
     const profile = lc_guess_profile(name, config, tokenizer_config, pooling_config);
-    if (!profile.dims) {
-      results.push({ root, error: "config.json has no hidden_size (is this an encoder / sentence-transformers model?)" });
+    if (!Number.isSafeInteger(profile.dims) || profile.dims < 1 || profile.dims > 65536) {
+      results.push({ root, error: "config.json must specify an integer embedding dimension from 1 to 65536" });
       continue;
     }
     const dest = `${lc_local_models_base_dir(env)}/${name}`;
@@ -29697,7 +29720,6 @@ async function lc_import_model_files(env, file_list, report = null) {
       copied += 1;
       bytes += f.size;
     }
-    const registry = lc_get_local_models_registry(env, true);
     const previous = registry[name] && typeof registry[name] === "object" ? registry[name] : {};
     registry[name] = {
       name,
@@ -29741,7 +29763,7 @@ async function lc_remove_local_model(env, name) {
   const key = LC_LOCAL_MODEL_PREFIX + name;
   const entry = lc_get_local_models_registry(env)[name];
   const public_key = entry?.source_model_key;
-  if (lc_models_using(env, key).length || public_key && lc_models_using(env, public_key).length) throw new Error("This model is selected by an embedding model configuration. Switch models first.");
+  if (lc_models_using(env, key).length || public_key && lc_local_model_key_for_public(env, public_key) === key && lc_models_using(env, public_key).length) throw new Error("This model is selected by an embedding model configuration. Switch models first.");
   const adapter = lc_vault_adapter(env);
   const storage_dir = entry?.storage_dir === LC_DOWNLOADED_MODELS_DIR ? LC_DOWNLOADED_MODELS_DIR : LC_LOCAL_MODELS_DIR;
   const dir = `${lc_plugin_dir(env)}/${storage_dir}/${name}`;
@@ -29798,16 +29820,14 @@ function lc_apply_connections_filters(connections_list, params) {
 }
 
 // --- vault data compaction ------------------------------------------------------
-// One vector file per model fingerprint lives under .smart-env/<collection>/. Files
-// for models that are no longer installed, references to them in the note records,
-// and data folders of collections that no longer exist are removed on load and
-// whenever a local model is removed, so the vault only carries what is in use.
+// Remove unused vector files and stale references on load and after a model is removed.
+// Other collections may share the data root and own their own records.
 var LC_BUNDLED_MODEL_KEY = "Snowflake/snowflake-arctic-embed-xs";
 var LC_COMPACT_DELAY_MS = 20000;
 function lc_env_data_dir(env) {
   return env?.data_fs_path || env?.data_fs?.fs_path || ".smart-env";
 }
-function lc_model_fingerprint_for_key(env, model_key) {
+function lc_model_fingerprint_for_key(env, model_key, legacy = false) {
   const profile = transformers_models[model_key];
   if (!profile) return null;
   const data = {
@@ -29817,7 +29837,7 @@ function lc_model_fingerprint_for_key(env, model_key) {
     max_tokens: Number(profile.max_tokens || 0)
   };
   const space = profile.semantic_profile?.embedding_space_id;
-  if (space) data.embedding_space_id = space;
+  if (space && !legacy) data.embedding_space_id = space;
   return `mf_${murmur_hash_32_alphanumeric(JSON.stringify(data))}`;
 }
 function lc_known_vector_files(env) {
@@ -29825,17 +29845,23 @@ function lc_known_vector_files(env) {
   const keys = new Set([LC_BUNDLED_MODEL_KEY]);
   const current = lc_current_model_key(env);
   if (current) keys.add(current);
-  for (const name of Object.keys(lc_get_local_models_registry(env))) {
-    if (lc_valid_model_name(name)) keys.add(LC_LOCAL_MODEL_PREFIX + name);
+  for (const [name, entry] of Object.entries(lc_get_local_models_registry(env))) {
+    if (!lc_valid_model_name(name) || !entry) continue;
+    keys.add(LC_LOCAL_MODEL_PREFIX + name);
+    if (Object.prototype.hasOwnProperty.call(LC_DOWNLOAD_MODELS, entry.source_model_key)) keys.add(entry.source_model_key);
   }
   const keep = new Set();
   for (const key of keys) {
     const fingerprint = lc_model_fingerprint_for_key(env, key);
-    if (fingerprint) keep.add(fingerprint);
+    if (fingerprint) {
+      keep.add(fingerprint);
+      keep.add(lc_model_fingerprint_for_key(env, key, true));
+    }
   }
   for (const collection of [env?.smart_sources, env?.smart_blocks]) {
     const active = collection?.embeddings?.active_file;
     if (active) keep.add(active);
+    for (const file of collection?.embeddings?._dirty_files || []) keep.add(file);
   }
   return keep;
 }
@@ -29843,69 +29869,80 @@ async function lc_compact_vault_data(env) {
   const adapter = lc_vault_adapter(env);
   if (!adapter || !env?.smart_sources) return null;
   const root = lc_env_data_dir(env);
-  const keep = lc_known_vector_files(env);
-  const summary = { removed_files: [], removed_dirs: [], cleared_refs: 0, saved_items: 0 };
-  const collections = [];
-  for (const collection of [env.smart_sources, env.smart_blocks]) {
-    if (collection?.embeddings?.data_dir && !collections.some((c) => c.embeddings.data_dir === collection.embeddings.data_dir)) collections.push(collection);
-  }
-  const removed = new Set();
-  for (const collection of collections) {
-    const dir = `${root}/${collection.embeddings.data_dir}`;
-    let listing = null;
+  const summary = { removed_files: [], cleared_refs: 0, saved_items: 0 };
+  const collections = [env.smart_sources, env.smart_blocks].filter((c) => c?.embeddings?.data_dir);
+  const files_by_dir = new Map();
+  for (const data_dir of new Set(collections.map((c) => c.embeddings.data_dir))) {
+    const dir = `${root}/${data_dir}`;
+    let listing;
     try {
-      if (!await adapter.exists(dir)) continue;
       listing = await adapter.list(dir);
     } catch (error) {
-      continue;
+      continue; // An unavailable store cannot establish that a reference is stale.
     }
-    for (const path of listing?.files || []) {
-      const name = path.split("/").pop();
-      if (!/^mf_[A-Za-z0-9]+$/.test(name) || keep.has(name)) continue;
+    if (!Array.isArray(listing?.files)) continue;
+    const files = new Set(listing.files);
+    files_by_dir.set(data_dir, files);
+    let keep = lc_known_vector_files(env);
+    for (const path of files) {
+      const name = path.slice(dir.length + 1);
+      if (!path.startsWith(dir + "/") || !lc_is_vector_filename(name) || keep.has(name)) continue;
       try {
         await adapter.remove(path);
-        removed.add(name);
-        summary.removed_files.push(`${collection.embeddings.data_dir}/${name}`);
+        files.delete(path);
+        summary.removed_files.push(`${data_dir}/${name}`);
       } catch (error) {
         console.warn("[Local Connections] could not remove vector file", path, error);
       }
+      // Registry and active buffers may have changed while the deletion awaited I/O.
+      keep = lc_known_vector_files(env);
     }
   }
-  for (const collection of [env.smart_sources, env.smart_blocks].filter((c) => c?.embeddings?.data_dir)) {
-    const dir = `${root}/${collection.embeddings.data_dir}`;
-    const exists_cache = new Map();
-    const file_exists = async (file) => {
-      if (removed.has(file)) return false;
-      if (!exists_cache.has(file)) exists_cache.set(file, await adapter.exists(`${dir}/${file}`));
-      return exists_cache.get(file);
-    };
+  for (const collection of collections) {
+    const data_dir = collection.embeddings.data_dir;
+    const files = files_by_dir.get(data_dir);
+    if (!files) continue;
+    const keep = lc_known_vector_files(env);
+    const stale = (file) => lc_is_vector_filename(file)
+      && !keep.has(file) && !files.has(`${root}/${data_dir}/${file}`);
     let changed = 0;
     for (const item of Object.values(collection.items || {})) {
       const embedding = item?.data?.embedding;
       if (!embedding || typeof embedding !== "object") continue;
       let item_changed = false;
       for (const [type, refs] of Object.entries(embedding)) {
-        if (type === "history" || !refs || typeof refs !== "object" || Array.isArray(refs)) continue;
+        if (type === "history" || type === "error" || !refs || typeof refs !== "object" || Array.isArray(refs)) continue;
+        if (refs.file) {
+          if (stale(refs.file)) {
+            delete embedding[type];
+            summary.cleared_refs++;
+            item_changed = true;
+          }
+          continue;
+        }
         for (const [fingerprint, ref] of Object.entries(refs)) {
           if (!ref || typeof ref !== "object" || !ref.file) continue;
-          if (await file_exists(ref.file)) continue;
+          if (!stale(ref.file)) continue;
           delete refs[fingerprint];
           summary.cleared_refs++;
           item_changed = true;
         }
-        if (!Object.keys(refs).length) delete embedding[type];
+        if (!Object.keys(refs).length) {
+          delete embedding[type];
+          item_changed = true;
+        }
       }
       if (Array.isArray(embedding.history) && embedding.history.length) {
         const next_history = [];
         for (const entry of embedding.history) {
-          if (entry?.file && !await file_exists(entry.file)) {
+          if (stale(entry?.file)) {
             summary.cleared_refs++;
             item_changed = true;
             continue;
           }
           next_history.push(entry);
         }
-        embedding.history = next_history;
+        if (next_history.length !== embedding.history.length) embedding.history = next_history;
       }
       if (item_changed) {
         item.queue_save?.();
@@ -29921,32 +29958,7 @@ async function lc_compact_vault_data(env) {
       }
     }
   }
-  // Data folders of collections this build no longer has (event_logs, smart_contexts, …):
-  // removed when they hold nothing but collection records.
-  const known_dirs = new Set();
-  for (const key of Object.keys(env.config?.collections || {})) {
-    known_dirs.add(env[key]?.data_dir || env.config.collections[key]?.data_dir || key);
-  }
-  for (const collection of collections) known_dirs.add(collection.embeddings.data_dir);
-  try {
-    const listing = await adapter.list(root);
-    for (const path of listing?.folders || []) {
-      const name = path.split("/").pop();
-      if (!name || name.startsWith(".") || known_dirs.has(name)) continue;
-      const contents = await adapter.list(path);
-      const only_records = !(contents?.folders || []).length && (contents?.files || []).every((file) => file.endsWith(".ajson"));
-      if (!only_records) continue;
-      try {
-        await adapter.rmdir(path, true);
-        summary.removed_dirs.push(name);
-      } catch (error) {
-        console.warn("[Local Connections] could not remove stale data folder", path, error);
-      }
-    }
-  } catch (error) {
-    console.warn("[Local Connections] could not list the data folder", error);
-  }
-  if (summary.removed_files.length || summary.removed_dirs.length || summary.cleared_refs) {
+  if (summary.removed_files.length || summary.cleared_refs) {
     console.log("[Local Connections] compacted vault data", summary);
   }
   return summary;
@@ -30018,10 +30030,11 @@ function lc_model_rows(env) {
     current: current_key === LC_BUNDLED_MODEL_KEY
   }];
   const names = Object.keys(registry).filter((n) => lc_valid_model_name(n) && registry[n] && typeof registry[n] === "object").sort((a, b) => a.localeCompare(b));
+  const public_alias = current_key && lc_local_model_key_for_public(env, current_key);
   for (const name of names) {
     const entry = registry[name];
     const key = LC_LOCAL_MODEL_PREFIX + name;
-    const current = current_key === key || Boolean(entry.source_model_key && current_key === entry.source_model_key && lc_local_model_key_for_public(env, current_key) === key);
+    const current = current_key === key || public_alias === key;
     rows.push({
       kind: "local",
       key,
@@ -30035,12 +30048,12 @@ function lc_model_rows(env) {
         entry.bytes ? lc_format_bytes(entry.bytes) : null,
         `folder: ${name}`
       ].filter(Boolean).join(" · "),
-      profile: {
+      profile: public_alias === key ? transformers_models[current_key]?.semantic_profile || {} : {
         pooling: entry.pooling === "cls" ? "cls" : "mean",
         query_prefix: typeof entry.query_prefix === "string" ? entry.query_prefix : "",
         document_prefix: typeof entry.document_prefix === "string" ? entry.document_prefix : ""
       },
-      editable: true,
+      editable: public_alias !== key,
       current
     });
   }
@@ -30059,27 +30072,30 @@ function lc_model_rows(env) {
   }
   return rows.sort((a, b) => a.current === b.current ? 0 : a.current ? -1 : 1);
 }
+async function lc_probe_embedding(adapter) {
+  await adapter.load();
+  const [result] = await adapter.embed_batch([{ embed_input: "test input", purpose: "document" }]);
+  return result;
+}
 async function lc_test_model_row(env, row, result_el) {
-  const config = lc_embedding_config(env);
-  if (!config) throw new Error("Embedding models collection unavailable.");
   result_el.setText("Testing… loading the model can take a moment.");
-  const temporary = config.data?.model_key !== row.key;
-  const item = temporary ? new config.constructor(env, { provider_key: "transformers", model_key: row.key }) : config;
+  let temporary;
   try {
-    const result = await item.test_model();
-    if (result?.success) {
-      const dims = Array.isArray(result.response?.vec) ? result.response.vec.length : null;
-      result_el.setText(`Model works${dims ? `: ${dims}-dimension vector for the test input` : ""}.`);
+    const config = env.embedding_models?.default;
+    if (!config) throw new Error("Embedding models collection unavailable.");
+    if (!row.current) {
+      temporary = new TransformersWorkerEmbeddingModelAdapter({ env, model_key: row.key, data: { use_gpu: config.data.use_gpu } });
+    }
+    const result = await lc_probe_embedding(temporary || config.instance);
+    if (result?.vec?.length && !result.error) {
+      result_el.setText(`Model works: ${result.vec.length}-dimension vector for the test input.`);
     } else {
-      result_el.setText(`Test failed: ${result?.error || result?.response?.error || "no embedding returned"}`);
+      result_el.setText(`Test failed: ${result?.error || "no embedding returned"}`);
     }
   } catch (error) {
     result_el.setText(`Test failed: ${error?.message || error}`);
   } finally {
-    if (temporary) {
-      try { item._instance?.unload?.(); } catch (_error) { }
-      item._instance = null;
-    }
+    temporary?.unload();
   }
 }
 var LcEmbeddingProfileModal = class extends import_obsidian_lc_models.Modal {
@@ -30099,7 +30115,7 @@ var LcEmbeddingProfileModal = class extends import_obsidian_lc_models.Modal {
     const intro = container.createDiv({ cls: "setting-item-description lc-model-profile-modal__intro" });
     intro.createEl("p", { text: "Pooling is how the model’s per-word vectors are combined into one vector for a note: Mean averages them, CLS takes the special first token. Prefixes are fixed phrases some models expect in front of every search query (for example “query: ”) and every note (“passage: ”)." });
     intro.createEl("p", { text: "Use whatever the model card says. Wrong values still produce vectors, but the connections get noticeably worse. Changing them while the model is in use rebuilds its embeddings." });
-    if (!row.editable) intro.createEl("p", { text: row.missing ? "These values are read from the model list and cannot be edited until the model is installed." : "These values are set by the model’s card and are fixed for the bundled model." });
+    if (!row.editable) intro.createEl("p", { text: row.missing ? "These values are read from the model list and cannot be edited until the model is installed." : "The selected model uses the standard profile from its model card." });
     const draft = {
       pooling: row.profile.pooling === "cls" ? "cls" : "mean",
       query_prefix: row.profile.query_prefix || "",

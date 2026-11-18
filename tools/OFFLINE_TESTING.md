@@ -1,7 +1,7 @@
 # Offline browser acceptance checks
 
 Run `python3 tools/install_test.py` for installer acceptance in a temporary
-directory. It verifies a read-only dry run, an injected partial-copy failure,
+directory. It verifies a read-only dry run, rejection of symlinked asset directories, an injected partial-copy failure,
 preservation of settings/custom/downloaded models, entrypoint activation order,
 and detection of corrupted installed assets. It never targets a real vault.
 
@@ -20,11 +20,13 @@ node tools/offline_browser_test.cjs --force-fallback
 node tools/offline_browser_test.cjs --safari-backend
 node tools/offline_browser_test.cjs --missing-runtime
 node tools/offline_browser_test.cjs --missing-model
+node tools/offline_browser_test.cjs --missing-sidecar
 ```
 
 Set `LC_PLAYWRIGHT_MODULE` to an existing Playwright module directory if it is
 outside Node's module search path. Set `LC_BROWSER_EXECUTABLE` to an existing
 Chrome/Chromium executable to use it instead of Playwright's managed Chromium.
+Set `LC_TEST_VERBOSE=1` to trace fixture requests and worker initialization.
 
 Successful inference must return three finite, normalized 384-dimensional
 vectors and rank the related bicycle passage above the unrelated cake passage.

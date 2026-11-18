@@ -3,7 +3,7 @@
 // harness (top-level `function`s are globals in jsc), then runs the async
 // pipeline on synthetic vectors. jsc has no setTimeout: lc_vault_yield falls
 // back to a resolved promise, and jsc drains microtasks before exiting.
-load("/Users/alex/Documents/dev/LocalConnections/tools/smoke_test.js");
+load("tools/smoke_test.js");
 
 function assert(cond, msg) { if (!cond) throw new Error("VAULT GRAPH TEST FAIL: " + msg); }
 

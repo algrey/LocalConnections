@@ -55,7 +55,7 @@ function require(name) {
   return make_module_stub(name);
 }
 
-load("/Users/alex/Documents/dev/LocalConnections/local-connections/main.js");
+load("local-connections/main.js");
 
 var exported = module.exports && (module.exports.default || module.exports);
 if (typeof exported !== "function") {

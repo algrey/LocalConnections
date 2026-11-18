@@ -23122,21 +23122,11 @@ async function getModelDataFiles(pretrained_model_name_or_path, fileName, suffix
       );
     }
     const chunkNames = getExternalDataChunkNames(baseName, num_chunks);
-    for (const path of chunkNames) {
+    externalDataPromises = chunkNames.map(async (path) => {
       const fullPath = `${options.subfolder ?? ""}/${path}`;
-      externalDataPromises.push(
-        new Promise(async (resolve, reject) => {
-          const data = await getModelFile(
-            pretrained_model_name_or_path,
-            fullPath,
-            true,
-            options,
-            return_path
-          );
-          resolve(data instanceof Uint8Array ? { path, data } : path);
-        })
-      );
-    }
+      const data = await getModelFile(pretrained_model_name_or_path, fullPath, true, options, return_path);
+      return data instanceof Uint8Array ? { path, data } : path;
+    });
   } else if (session_options.externalData !== void 0) {
     externalDataPromises = session_options.externalData.map(async (ext) => {
       if (typeof ext.data === "string") {

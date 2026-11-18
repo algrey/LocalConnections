@@ -1,7 +1,7 @@
 // Embedding model load path: background load failures surface as error events,
 // a dead worker is retried (with backoff) instead of failing forever, and
 // "Test model" loads before embedding. No real worker, vault or network.
-load("/Users/alex/Documents/dev/LocalConnections/tools/smoke_test.js");
+load("tools/smoke_test.js");
 var console = { log: function () {}, warn: function () {}, error: function () {} };
 function assert(value, message) { if (!value) throw new Error("MODEL LOAD TEST FAIL: " + message); }
 async function rejects(fn, message) {
@@ -21,7 +21,7 @@ Worker = function StubWorker() {
     self.messages.push(msg);
     if (worker_mode === "fail") return self.onmessage({ currentTarget: self, data: { id: msg.id, error: "Model files missing (404)" } });
     if (msg.method === "load") return self.onmessage({ currentTarget: self, data: { id: msg.id, result: { model_loaded: true, model_config_key: "wasm" }, model_config_key: "wasm" } });
-    if (msg.method === "embed_batch") return self.onmessage({ currentTarget: self, data: { id: msg.id, result: msg.params.inputs.map(function () { return { vec: [1, 0], tokens: 1 }; }) } });
+    if (msg.method === "embed_batch") return self.onmessage({ currentTarget: self, data: { id: msg.id, result: msg.params.inputs.map(function () { return { vec: new Float32Array([1, 0]), tokens: 1 }; }) } });
     if (msg.method === "count_tokens") return self.onmessage({ currentTarget: self, data: { id: msg.id, result: { tokens: 3 } } });
   };
   this.terminate = function () { self.terminated = true; };
@@ -103,6 +103,25 @@ var finished = false, failure = null;
   result = await item.test_model();
   assert(load_calls === 2 && result.success === true && item.data.test_passed === true, "test_model passes after load");
 
+  // The settings card probes the current adapter without emitting a settings
+  // save. A probe of a different model gets its own short-lived worker.
+  var config = { data: model.data, instance: adapter, test_model: function () { throw Error("persisting probe called"); } };
+  model.env.embedding_models = { default: config };
+  var status = { setText: function (value) { this.text = value; } };
+  await lc_test_model_row(model.env, { current: true, key: "lc-local/public-alias" }, status);
+  assert(status.text.includes("2-dimension") && adapter.worker, "active model probe reports its typed vector");
+  var current_worker = adapter.worker;
+  var count_before = workers.length;
+  await lc_test_model_row(model.env, { current: false, key: LC_BUNDLED_MODEL_KEY }, status);
+  assert(status.text.includes("2-dimension") && workers.length === count_before + 1, "unselected model probed");
+  assert(workers[workers.length - 1].terminated && !current_worker.terminated, "only the temporary worker is released");
+
+  var syncs = 0, original_sync = lc_sync_local_transformers_models;
+  lc_sync_local_transformers_models = function (env) { syncs++; return original_sync(env); };
+  await adapter.count_tokens("hello");
+  await adapter.embed_batch([{ embed_input: "again" }]);
+  assert(syncs === 0, "normal inference does not rebuild the model registry");
+  lc_sync_local_transformers_models = original_sync;
   finished = true;
 })().catch(function (error) { failure = error; });
 if (typeof drainMicrotasks === "function") drainMicrotasks();

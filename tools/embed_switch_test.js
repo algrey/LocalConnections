@@ -4,7 +4,7 @@
 // must stop quietly (no error notice) and every item must end up embedded with
 // the new model, whether the restart lands during the old run or after it.
 // Drives the real EmbeddingsVectorAdapter with a fake collection; no worker.
-load("/Users/alex/Documents/dev/LocalConnections/tools/smoke_test.js");
+load("tools/smoke_test.js");
 var logs = [];
 var console = { log: function () {}, warn: function () { logs.push("warn " + [].slice.call(arguments).join(" ")); }, error: function () { logs.push("error " + [].slice.call(arguments).join(" ")); } };
 var setTimeout = function (fn) { Promise.resolve().then(fn); return 1; };
@@ -80,5 +80,8 @@ function scenario(name, switch_when) {
     assert(!logs.some(function (l) { return l.indexOf("error") === 0; }), name + ": nothing logged as an error, logs " + JSON.stringify(logs));
   })();
 }
-var finished = false;
-scenario("switch during run", "during").then(function () { return scenario("switch after halt", "after"); }).then(function () { finished = true; print("embed switch test ok"); }).catch(function (e) { print(e.stack || String(e)); throw e; });
+var finished = false, failure;
+scenario("switch during run", "during").then(function () { return scenario("switch after halt", "after"); }).then(function () { finished = true; print("embed switch test ok"); }).catch(function (e) { failure = e; });
+drainMicrotasks();
+if (failure) throw failure;
+assert(finished, "model switch scenarios completed");

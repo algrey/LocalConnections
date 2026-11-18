@@ -5,7 +5,7 @@
 | Path | What it is |
 |---|---|
 | `local-connections/` | **The plugin. The source of truth.** `main.js`, `styles.css`, `manifest.json`, `README.md`, `d3.v7.min.js`, `offline-assets.json`, `runtime/`, `bundled-models/` |
-| `tools/check.sh` | Verifies bundled asset hashes and runs seven jsc suites. Run after every edit |
+| `tools/check.sh` | Verifies bundled asset hashes and runs eleven jsc suites. Run after every edit |
 | `tools/install.sh` | Verifies, then copies the complete plugin into the vault (`-n` for a dry run) |
 | `tools/modules.py` | Maps the ~380 modules inside `main.js` — the way to navigate 30k lines |
 | `tools/*_test.js` | The jsc tests themselves |
@@ -38,7 +38,7 @@ embeddings has no such safety net.)
 ## The loop
 
 ```bash
-tools/check.sh          # asset verification and 7 jsc suites
+tools/check.sh          # asset verification and 11 jsc suites
 tools/install.sh        # checks, then copies to the vault
 ```
 
@@ -213,7 +213,7 @@ SHA-256 hashes. `tools/offline_assets_check.sh [plugin-directory]` validates
 source or installed assets. This is a packaging integrity check, not an
 authenticated updater. When changing a vendored file, review its provenance
 and update its manifest hash deliberately. The Transformers bundle is patched
-to resolve backend modules/WASM from the plugin's local resource directory.
+to resolve backend modules/WASM from the plugin's local resource directory and to propagate failed reads of split ONNX data files.
 
 `tools/install.sh` copies each file to a temporary sibling and verifies it
 before replacement, verifies the installed assets, then activates `main.js`

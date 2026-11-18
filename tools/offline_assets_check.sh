@@ -7,9 +7,9 @@ if [ ! -f "$MANIFEST" ]; then
   echo "FAIL: missing $MANIFEST" >&2
   exit 1
 fi
-/usr/bin/python3 - "$ROOT" "$MANIFEST" <<'PY'
-import hashlib, json, os, sys
-root, manifest_path = sys.argv[1:]
+/usr/bin/python3 - "$ROOT" "$MANIFEST" "${2:-}" <<'PY'
+import hashlib, json, os, re, sys
+root, manifest_path, output = sys.argv[1:]
 with open(manifest_path, encoding="utf-8") as f:
     manifest = json.load(f)
 files = {}
@@ -27,6 +27,9 @@ required = {
     "bundled-models/snowflake-arctic-embed-xs/LICENSE-APACHE-2.0.txt",
     "bundled-models/snowflake-arctic-embed-xs/LICENSE.txt",
     "bundled-models/snowflake-arctic-embed-xs/config.json",
+    "bundled-models/snowflake-arctic-embed-xs/1_Pooling/config.json",
+    "bundled-models/snowflake-arctic-embed-xs/special_tokens_map.json",
+    "bundled-models/snowflake-arctic-embed-xs/vocab.txt",
     "bundled-models/snowflake-arctic-embed-xs/tokenizer.json",
     "bundled-models/snowflake-arctic-embed-xs/tokenizer_config.json",
     "bundled-models/snowflake-arctic-embed-xs/onnx/model_quantized.onnx"
@@ -35,13 +38,17 @@ if not required.issubset(files):
     raise SystemExit("FAIL: asset manifest omits required files: " + ", ".join(sorted(required - files.keys())))
 failed = False
 for rel, expected in files.items():
+    if not re.fullmatch(r"(?:runtime|bundled-models)(?:/[A-Za-z0-9_-][A-Za-z0-9._-]*)+", rel):
+        raise SystemExit("FAIL: invalid bundled asset path")
     path = os.path.realpath(os.path.join(root, rel))
-    if not path.startswith(os.path.realpath(root) + os.sep) or not isinstance(expected, str) or not expected.startswith("sha256:"):
+    if not path.startswith(os.path.realpath(root) + os.sep) or not isinstance(expected, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", expected):
         raise SystemExit("FAIL: invalid asset manifest path/hash")
     if not os.path.isfile(path):
         print(f"FAIL: missing bundled asset {rel}", file=sys.stderr)
         failed = True
         continue
+    if output == "--list":
+        continue  # The installer has already verified source bytes via check.sh.
     digest = hashlib.sha256()
     with open(path, "rb") as asset:
         for chunk in iter(lambda: asset.read(1024 * 1024), b""):
@@ -52,5 +59,8 @@ for rel, expected in files.items():
         failed = True
 if failed:
     sys.exit(1)
-print(f"Offline assets verified: {len(files)} files")
+if output == "--list":
+    print("\n".join(sorted(files)))
+else:
+    print(f"Offline assets verified: {len(files)} files")
 PY

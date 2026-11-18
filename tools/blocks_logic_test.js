@@ -1,6 +1,6 @@
 // jsc test for "blocks on demand" (v1.5.2): the effective embed_blocks helper
 // and the gated block parser, against fake env/source objects.
-load("/Users/alex/Documents/dev/LocalConnections/tools/smoke_test.js");
+load("tools/smoke_test.js");
 
 function assert(cond, msg) {
   if (!cond) throw new Error("ASSERT FAIL: " + msg);

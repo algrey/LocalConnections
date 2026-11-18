@@ -38,6 +38,15 @@ with tempfile.TemporaryDirectory(prefix="lc-install-test-") as temporary:
     assert dry.returncode == 0, dry.stdout + dry.stderr
     assert snapshot(target) == before, "dry run changed files"
 
+    alternate = temp / "alternate"
+    alternate.mkdir()
+    linked = target / "bundled-models"
+    linked.symlink_to(alternate, target_is_directory=True)
+    refused = subprocess.run([str(installer)], env=env, capture_output=True, text=True)
+    assert refused.returncode != 0 and "symlink" in refused.stderr, "linked asset directory accepted"
+    assert not list(alternate.iterdir()) and snapshot(target) == before, "preflight changed files"
+    linked.unlink()
+
     # Fail after partially writing the temporary copy. The original must survive.
     shims = temp / "bin"
     shims.mkdir()

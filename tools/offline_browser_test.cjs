@@ -6,6 +6,7 @@ const { chromium } = require(process.env.LC_PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(__dirname, '..');
 const missingRuntime = process.argv.includes('--missing-runtime');
 const missingModel = process.argv.includes('--missing-model');
+const missingSidecar = process.argv.includes('--missing-sidecar');
 const forceFallback = process.argv.includes('--force-fallback');
 const safariBackend = process.argv.includes('--safari-backend');
 const deadline = setTimeout(() => { console.error('Offline browser test timed out'); process.exit(1); }, 90000);
@@ -23,6 +24,7 @@ const mime = {'.js':'text/javascript','.mjs':'text/javascript','.json':'applicat
   if (url.origin !== testOrigin) {external.push(request.url()); await route.abort('internetdisconnected');return;}
   let relative = decodeURIComponent(url.pathname).replace(/^\//,'');
   local.push(relative);
+  if (process.env.LC_TEST_VERBOSE) console.log(request.method(), relative);
   const headers = {'Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder-Policy':'require-corp'};
   if (!relative) {
    let html = fs.readFileSync(path.join(root,'tools/harness/index.html'),'utf8').split('<script src="main.js"></script>')[0];
@@ -35,11 +37,17 @@ const mime = {'.js':'text/javascript','.mjs':'text/javascript','.json':'applicat
   if ((missingRuntime && relative === 'runtime/transformers-4.2.0.js') || (missingModel && relative.startsWith('bundled-models/') && relative.endsWith('/config.json'))) { await route.fulfill({status:404,body:''}); return; }
   const filename = path.resolve(root,'local-connections',relative);
   if (!filename.startsWith(path.join(root,'local-connections')+path.sep)) throw Error('unsafe fixture path');
+  if (missingSidecar && relative === 'bundled-models/snowflake-arctic-embed-xs/config.json' && request.method() !== 'HEAD') {
+   const config = JSON.parse(fs.readFileSync(filename, 'utf8'));
+   config['transformers.js_config'] = {...config['transformers.js_config'], use_external_data_format: 2};
+   await route.fulfill({status:200, headers, contentType:'application/json', body:JSON.stringify(config)});
+   return;
+  }
   try {await route.fulfill({status:200,headers,contentType:mime[path.extname(filename)]||'application/octet-stream',body:request.method()==='HEAD'?'':fs.readFileSync(filename)});}
   catch(error){await route.fulfill({status:404,headers,body:''});}
  });
  const page = await context.newPage();
- page.on('console',message => { if(message.type()==='error'||message.type()==='warning') console.log('browser:',message.text().slice(0,450)); });
+ page.on('console',message => { if(process.env.LC_TEST_VERBOSE || message.type()==='error'||message.type()==='warning') console.log('browser:',message.text().slice(0,450)); });
  page.on('pageerror',error => console.log('pageerror:',error.message));
  await page.goto(testOrigin);
  const result = await page.evaluate(async ({prefix, gpu, forceFallback, safariBackend}) => {
@@ -78,10 +86,11 @@ const mime = {'.js':'text/javascript','.mjs':'text/javascript','.json':'applicat
  },{prefix,gpu:process.argv.includes('--gpu') || forceFallback,forceFallback,safariBackend});
  console.log(JSON.stringify({result,externalRequests:external,localRequestCount:local.length},null,2));
  if (external.length) throw Error('Attempted external requests');
- if (missingRuntime || missingModel) {
+ if (missingRuntime || missingModel || missingSidecar) {
   if (!result.error) throw Error('Missing asset did not fail locally');
   if (missingRuntime && !/runtime|module|bundled|incomplete/i.test(result.error)) throw Error('Unexpected runtime failure: '+result.error);
   if (missingModel && !/config\.json|model|bundled|incomplete/i.test(result.error)) throw Error('Unexpected model failure: '+result.error);
+  if (missingSidecar && !/onnx_data|bundled.*incomplete/i.test(result.error)) throw Error('Unexpected sidecar failure: '+result.error);
  } else {
   if(result.error || !result.finite || result.dimensions.some(n=>n!==384) || result.norms.some(n=>Math.abs(n-1)>0.001) || result.related<=result.unrelated) throw Error('Offline acceptance failed');
   if (forceFallback && !result.backend.startsWith('wasm_')) throw Error('CPU fallback did not run');

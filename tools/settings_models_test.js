@@ -2,7 +2,7 @@
 // by "Use", the model list covers the bundled model, every installed folder and
 // a selected-but-missing model, and the intro describes the product. No DOM,
 // vault or worker.
-load("/Users/alex/Documents/dev/LocalConnections/tools/smoke_test.js");
+load("tools/smoke_test.js");
 var console = { log: function () {}, warn: function () {}, error: function () {} };
 function assert(value, message) { if (!value) throw new Error("SETTINGS MODELS TEST FAIL: " + message); }
 var BUNDLED = "Snowflake/snowflake-arctic-embed-xs";
@@ -69,6 +69,7 @@ lc_use_model_key(env, "TaylorAI/bge-micro-v2");
 rows = lc_model_rows(env);
 var current = rows.filter(function (r) { return r.current; });
 assert(current.length === 1 && current[0].kind === "local" && current[0].folder === "downloaded-TaylorAI-bge-micro-v2", "public key shown as the downloaded folder that serves it");
+assert(!current[0].editable && current[0].profile === transformers_models["TaylorAI/bge-micro-v2"].semantic_profile, "public selection displays its fixed profile");
 
 // 5. a selected model with no files is flagged
 var env2 = make_env([make_config("transformers#c", "Xenova/multilingual-e5-small")], "transformers#c", {});

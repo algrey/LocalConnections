@@ -3,7 +3,7 @@
 // feature against a fake env: parameter building (filters), the synthetic
 // centre item, and the real LookupList retrieval path (lookup_list_get_results
 // -> pre_process -> similarity) with a stubbed embed model.
-load("/Users/alex/Documents/dev/LocalConnections/tools/smoke_test.js");
+load("tools/smoke_test.js");
 
 function assert(cond, msg) {
   if (!cond) throw new Error("ASSERT FAIL: " + msg);

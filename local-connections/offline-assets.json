@@ -4,7 +4,7 @@
     "transformers_js": "4.2.0",
     "onnxruntime_web": "1.26.0-dev.20260416-b7804b056c",
     "files": {
-      "runtime/transformers-4.2.0.js": "sha256:e99b3167a06a1fc7293cee6cf5fd5cdb425e163946cae759bb325332aac69214",
+      "runtime/transformers-4.2.0.js": "sha256:8670246960c8de6e14b4e2e8d715f54e5d0ae3958f8efdc28657b662d4db7693",
       "runtime/ort-wasm-simd-threaded.asyncify.mjs": "sha256:5959c6733039619c9af710d8e1bae8d6e84402787990637be987c2b1bd6c5fa9",
       "runtime/ort-wasm-simd-threaded.asyncify.wasm": "sha256:e0c0c6d3e73d43b8a249972f8358f845b08cc16fec3c80efafdf8bed40366786",
       "runtime/ort-wasm-simd-threaded.jsep.mjs": "sha256:522b3769929f5684c83a12cf1e06eedf073b65d161728b4f3757c75d62b14384",

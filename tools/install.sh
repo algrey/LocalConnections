@@ -11,6 +11,28 @@ if [ ! -d "$DEST" ]; then
   exit 1
 fi
 "$(dirname "$0")/check.sh"
+DEST="$(cd "$DEST" && pwd -P)"
+assets=$("$(dirname "$0")/offline_assets_check.sh" "$SRC" --list)
+plugin_files=(styles.css README.md d3.v7.min.js manifest.json main.js)
+
+# Preflight before the first copy. A synced or linked child of the plugin
+# directory must not redirect a temporary file or replacement elsewhere.
+check_target() {
+  local rel="$1" path="$DEST/$1"
+  if [ -e "$path" ] && [ ! -f "$path" ]; then
+    echo "FAIL: expected a regular file at $rel" >&2
+    return 1
+  fi
+  while [ "$path" != "$DEST" ]; do
+    if [ -L "$path" ]; then
+      echo "FAIL: symlink in install path: $rel" >&2
+      return 1
+    fi
+    path="${path%/*}"
+  done
+}
+while IFS= read -r asset; do check_target "$asset"; done <<< "$assets"
+for file in offline-assets.json "${plugin_files[@]}"; do check_target "$file"; done
 
 # A failed/interrupted copy must never truncate a file in the live installation.
 LC_INSTALL_TEMP=""
@@ -39,17 +61,12 @@ copy_file() {
 }
 
 # Finish and verify the immutable assets before activating the new main.js.
-for directory in runtime bundled-models; do
-  [ -d "$SRC/$directory" ] || { echo "FAIL: missing $directory" >&2; exit 1; }
-  while IFS= read -r -d '' asset; do
-    copy_file "${asset#"$SRC/"}"
-  done < <(find "$SRC/$directory" -type f -print0)
-done
+while IFS= read -r asset; do copy_file "$asset"; done <<< "$assets"
 copy_file offline-assets.json
 if [ "$DRY" -eq 0 ]; then
   "$(dirname "$0")/offline_assets_check.sh" "$DEST"
 fi
-for file in styles.css README.md d3.v7.min.js manifest.json main.js; do
+for file in "${plugin_files[@]}"; do
   copy_file "$file"
 done
 if [ "$DRY" -eq 1 ]; then

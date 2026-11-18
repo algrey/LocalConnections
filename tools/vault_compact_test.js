@@ -1,19 +1,19 @@
 // Vault data compaction: vector files of models that are not installed are
 // removed, references to them (and to already-missing files) are stripped from
-// the note records, stale collection folders holding only .ajson records go,
-// and everything in use is kept. In-memory fake vault adapter; no Obsidian.
-load("/Users/alex/Documents/dev/LocalConnections/tools/smoke_test.js");
+// the note records. Shared collection records and live stores are preserved.
+load("tools/smoke_test.js");
 var console = { log: function () {}, warn: function () {}, error: function () {} };
 var setTimeout = function (fn) { fn(); return 1; };
 function assert(v, m) { if (!v) throw new Error("VAULT COMPACT TEST FAIL: " + m); }
 var ARCTIC = "Snowflake/snowflake-arctic-embed-xs";
 var arctic_fp = lc_model_fingerprint_for_key({ settings: {} }, ARCTIC);
 assert(arctic_fp === "mf_in00wz", "bundled fingerprint matches the vault's file name, got " + arctic_fp);
+assert(lc_is_vector_filename(arctic_fp) && !lc_is_vector_filename("archive/" + arctic_fp), "stored vector references must name a fingerprint");
 
 // fake vault: paths → contents; folders implied
 var files = {
   ".smart-env/smart_env.json": "{}",
-  ".smart-env/smart_sources/smart_sources.ajson": "",
+  ".smart-env/smart_sources/smart_sources.ajson": "source records",
   ".smart-env/smart_sources/mf_in00wz": "cur",
   ".smart-env/smart_sources/mf_keep01": "installed model",
   ".smart-env/smart_sources/mf_old001": "orphan",
@@ -22,7 +22,8 @@ var files = {
   ".smart-env/event_logs/event_logs.ajson": "",
   ".smart-env/smart_contexts/.keep": "",
   ".smart-env/other_thing/data.bin": "",
-  ".smart-env/embedding_models/embedding_models.ajson": ""
+  ".smart-env/embedding_models/embedding_models.ajson": "model records",
+  ".smart-env/user-backup/archive.ajson": "user backup"
 };
 var removed = [], rmdirs = [];
 var adapter = {
@@ -42,9 +43,14 @@ var adapter = {
 };
 lc_vault_adapter = function () { return adapter; };
 // registry: one installed folder whose fingerprint we pin to mf_keep01
-var registry = { "my-model": { dims: 384, max_tokens: 512, pooling: "mean" } };
+var public_key = "TaylorAI/bge-micro-v2";
+var registry = { "my-model": { dims: 384, max_tokens: 512, pooling: "mean", source_model_key: public_key } };
+var public_fp = lc_model_fingerprint_for_key({}, public_key);
+var legacy_fp = lc_model_fingerprint_for_key({}, public_key, true);
+files[".smart-env/smart_sources/" + public_fp] = "public model vectors";
+files[".smart-env/smart_sources/" + legacy_fp] = "legacy model vectors";
 var real_fp = lc_model_fingerprint_for_key;
-lc_model_fingerprint_for_key = function (env, key) { return key === "lc-local/my-model" ? "mf_keep01" : real_fp(env, key); };
+lc_model_fingerprint_for_key = function (env, key, legacy) { return key === "lc-local/my-model" ? "mf_keep01" : real_fp(env, key, legacy); };
 function item(key, refs, history) {
   var it = { key: key, saved: 0, data: { embedding: { history: history || [], default: refs } } };
   it.queue_save = function () { it.saved++; };
@@ -53,6 +59,7 @@ function item(key, refs, history) {
 var a = item("a", { mf_in00wz: { file: "mf_in00wz", file_i: 0, read_hash: "h" }, mf_old001: { file: "mf_old001", file_i: 0, read_hash: "h" } });
 var b = item("b", { mf_old002: { file: "mf_old002", file_i: 1, read_hash: "h" }, mf_gone00: { file: "mf_gone00", file_i: 3, read_hash: "h" } }, [{ file: "mf_old001", file_i: 9 }, { file: "mf_in00wz", file_i: 1 }]);
 var c = item("c", { mf_keep01: { file: "mf_keep01", file_i: 2, read_hash: "h" } });
+var pending = item("pending", { mf_new: { file: "mf_new" }, mf_dirty: { file: "mf_dirty" } }, [{ file: "mf_dirty" }]);
 var saves = 0;
 var env = {
   state: "loaded",
@@ -61,9 +68,9 @@ var env = {
   config: { collections: { smart_sources: {}, smart_blocks: {}, embedding_models: { data_dir: "embedding_models" } } },
   embedding_models: { default: { data: { model_key: ARCTIC } } },
   smart_sources: { data_dir: "smart_sources", embeddings: { data_dir: "smart_sources", active_file: "mf_in00wz" }, items: { a: a, b: b, c: c }, process_save_queue: async function () { saves++; } },
-  smart_blocks: { data_dir: "smart_sources", embeddings: { data_dir: "smart_sources", active_file: "mf_in00wz" }, items: {} }
+  smart_blocks: { data_dir: "smart_sources", embeddings: { data_dir: "smart_sources", active_file: "mf_new", _dirty_files: new Set(["mf_dirty"]) }, items: { pending: pending } }
 };
-var finished = false;
+var finished = false, failure;
 lc_compact_vault_data(env).then(function (summary) {
   assert(removed.indexOf(".smart-env/smart_sources/mf_old001") !== -1 && removed.indexOf(".smart-env/smart_sources/mf_old002") !== -1, "orphan vector files removed: " + JSON.stringify(removed));
   assert(files[".smart-env/smart_sources/mf_in00wz"] && files[".smart-env/smart_sources/mf_keep01"], "current and installed-model files kept");
@@ -74,7 +81,9 @@ lc_compact_vault_data(env).then(function (summary) {
   assert(c.data.embedding.default.mf_keep01 && c.saved === 0, "untouched record not re-saved");
   assert(a.saved === 1 && b.saved === 1 && saves === 1, "changed records queued and saved once");
   assert(summary.cleared_refs === 4, "cleared refs counted, got " + summary.cleared_refs);
-  assert(rmdirs.indexOf(".smart-env/event_logs") !== -1, "stale record folder removed");
+  assert(!rmdirs.length && files[".smart-env/user-backup/archive.ajson"] === "user backup", "shared record directories preserved");
+  assert(files[".smart-env/smart_sources/" + public_fp] && files[".smart-env/smart_sources/" + legacy_fp], "public and legacy aliases of installed models retained");
+  assert(pending.saved === 0 && pending.data.embedding.default.mf_new && pending.data.embedding.default.mf_dirty && pending.data.embedding.history.length === 1, "active and buffered refs survive before the first disk write");
   assert(rmdirs.indexOf(".smart-env/smart_contexts") === -1, "folder with non-record files kept: " + JSON.stringify(rmdirs));
   assert(rmdirs.indexOf(".smart-env/other_thing") === -1, "folder with binary data kept");
   assert(files[".smart-env/embedding_models/embedding_models.ajson"], "live collection folder kept");
@@ -92,4 +101,7 @@ lc_compact_vault_data(env).then(function (summary) {
   lc_compact_vault_data = real;
   finished = true;
   print("vault compact test ok");
-}).catch(function (e) { print(e.stack || String(e)); throw e; });
+}).catch(function (e) { failure = e; });
+drainMicrotasks();
+if (failure) throw failure;
+assert(finished, "compaction scenarios completed");
